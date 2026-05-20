@@ -1,5 +1,5 @@
 import { config as loadEnv } from "dotenv";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, createPartFromBase64 } from "@google/genai";
 
 console.log("GEMINI_SOLVER_FILE_LOADED");
 
@@ -12,12 +12,35 @@ const GEMINI_MODEL = (process.env.GEMINI_MODEL || "gemini-2.5-flash-lite").repla
   /^models\//,
   ""
 );
+const GEMINI_SOLVER_MODELS = [
+  process.env.GEMINI_SOLVER_MODEL,
+  GEMINI_MODEL,
+  "gemini-2.5-flash",
+  "gemini-2.0-flash",
+  "gemini-1.5-flash",
+]
+  .filter(Boolean)
+  .map((model) => String(model).replace(/^models\//, ""))
+  .filter((model, index, models) => models.indexOf(model) === index);
+const GEMINI_IMAGE_MODELS = [
+  process.env.GEMINI_IMAGE_MODEL,
+  process.env.GEMINI_SOLVER_MODEL,
+  GEMINI_MODEL,
+  "gemini-2.5-flash",
+  "gemini-2.0-flash",
+  "gemini-1.5-flash",
+]
+  .filter(Boolean)
+  .map((model) => String(model).replace(/^models\//, ""))
+  .filter((model, index, models) => models.indexOf(model) === index);
 
 const ai = process.env.GEMINI_API_KEY
   ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
   : null;
 
 export const STEM_NO_ANSWER_TEXT = "It is not provided in the book.";
+const SOLVER_TEMPORARY_FAILURE_TEXT =
+  "I could not generate an answer right now. Please try again in a moment.";
 const PLANCK_CONSTANT = 6.62607015e-34;
 const SPEED_OF_LIGHT = 299792458;
 const ELEMENTARY_CHARGE = 1.602176634e-19;
@@ -25,17 +48,21 @@ const TWO_PI = 2 * Math.PI;
 const GENERIC_NUMERICAL_VERB_PATTERN =
   /\b(find|calculate|determine|evaluate|compute|solve|corresponding|derive|obtain|what\s+is|how\s+much|how\s+many)\b/i;
 const GENERIC_SUBJECT_HINT_PATTERN =
-  /\b(frequency|amplitude|wavelength|velocity|acceleration|force|field|potential|current|charge|resistance|power|energy|work|mass|molarity|moles?|atoms?|molecules?|concentration|pressure|density|profit|loss|discount|interest|principal|amount|balance|ratio|percentage|equation|formula|sum|average|factorial|acid|base|solution|mixture|dilute|diluted|alloy|set|sets|subset|superset|union|intersection|venn|sin|cos|tan|cot|sec|cosec|trigonometric|log|ln)\b/i;
+  /\b(frequency|amplitude|wavelength|velocity|acceleration|force|field|potential|current|charge|resistance|power|energy|work|mass|molarity|moles?|atoms?|molecules?|concentration|pressure|density|profit|loss|discount|interest|principal|amount|balance|ratio|percentage|equation|formula|sum|average|factorial|acid|base|solution|mixture|dilute|diluted|alloy|reaction|reactants?|products?|oxidation|reduction|journal|ledger|trial\s+balance|balance\s+sheet|cash\s+book|debit|credit|capital|assets?|liabilities|revenue|expense|stock|inventory|demand|supply|market|table|graph|diagram|set|sets|subset|superset|union|intersection|venn|sin|cos|tan|cot|sec|cosec|trigonometric|log|ln)\b/i;
 const GENERIC_UNIT_PATTERN =
   /\b(?:hz|khz|mhz|ghz|ev|mev|gev|v|mv|kv|a|ma|amp|amps|w|kw|mw|j|kj|nj|mj|t|tesla|wb|weber|c|coulomb|ohm|omega|pa|atm|bar|mol|mole|molar|n\/c|v\/m|rad\/s|m\/s|m\/s\^?2|cm|mm|m|km|g|kg|mg|l|ml|litre|litres|liter|liters|rs|₹|%|hour|hours|hr|hrs|min|mins|minute|minutes|second|seconds|sec|secs)\b/i;
 const GENERIC_ASSIGNMENT_PATTERN = /\b[a-z]\s*=\s*-?\d+(?:\.\d+)?\b/i;
 const DIRECT_GEMINI_SUBJECT_PATTERN =
   /\b(math|maths|mathematics|physics|chemistry|accounts?|accountancy|commerce|business|trade|market|demand|supply|algebra|geometry|trigonometry|mensuration|statistics|probability|set|sets|subset|superset|union|intersection|sin|cos|tan|cot|sec|cosec|log|ln)\b/i;
 const DIRECT_GEMINI_PROBLEM_PATTERN =
-  /\b(solve|calculate|find|determine|evaluate|compute|simplify|derive|verify|prove|show\s+that|sum|numerical|word\s+problem|equation|formula|inequality|expression|ratio|percentage|interest|profit|loss|discount|average|mean|median|mode|probability|perimeter|area|volume|speed|distance|time|velocity|acceleration|force|energy|power|current|charge|resistance|molarity|moles?|concentration|acid|solution|mixture|dilute|diluted|alloy|subset|superset|union|intersection|identity|balance|ledger|debit|credit|trial\s+balance|journal(?:ise|ize)?|journal\s+entry|pass\s+journal\s+entries|record|prepare|balance\s+sheet|cash\s+book|goodwill|demand|supply|market|business)\b/i;
+  /\b(solve|calculate|find|determine|evaluate|compute|simplify|derive|verify|prove|show\s+that|balance|balancing|draw|plot|interpret|prepare|record|post|pass|sum|numerical|word\s+problem|equation|formula|inequality|expression|ratio|percentage|interest|profit|loss|discount|average|mean|median|mode|probability|perimeter|area|volume|speed|distance|time|velocity|acceleration|force|energy|power|current|charge|resistance|molarity|moles?|concentration|acid|base|salt|solution|mixture|dilute|diluted|alloy|reaction|chemical\s+equation|subset|superset|union|intersection|identity|ledger|debit|credit|trial\s+balance|journal(?:ise|ize)?|journal\s+entry|pass\s+journal\s+entries|balance\s+sheet|cash\s+book|goodwill|demand|supply|market|business|table|graph|diagram)\b/i;
 const DIRECT_GEMINI_SET_PATTERN =
   /\b(natural|whole|integer|integers|rational|real)\s+numbers?\b/i;
 const DIRECT_GEMINI_SYMBOL_PATTERN = /(?:<=|>=|<|>|=|√|π|²|³|[+\-*/^])/i;
+const SOLVER_SUPPORTED_SUBJECT_PATTERN =
+  /\b(math|maths|mathematics|physics|chemistry|accounts?|accountancy|commerce|business(?:\s+studies)?|economics|algebra|calculus|geometry|trigonometry|mensuration|statistics|probability|mechanics|electricity|magnetism|thermodynamics|optics|stoichiometry|organic|inorganic|journal|ledger|trial\s+balance|balance\s+sheet|cash\s+book|debit|credit|profit|loss|demand|supply|market)\b/i;
+const STRUCTURED_SOLVER_INPUT_PATTERN =
+  /\b(table|graph|diagram|figure|chart|data|ledger|journal|trial\s+balance|balance\s+sheet|cash\s+book|equation|reaction)\b/i;
 const FORCE_DIRECT_GEMINI_PATTERN =
   /\b(math|maths|mathematics|physics|chemistry|accounts?|accountancy|commerce|business|trade|market|demand|supply|equation|equations|sum|sums|algebra|trigonometry|mensuration|probability|statistics|acid|solution|mixture|dilute|diluted|alloy|concentration|set|sets|subset|superset|union|intersection)\b/i;
 const THEORY_QUESTION_PATTERN =
@@ -260,6 +287,31 @@ const shouldForceDirectGeminiSolve = (question) => {
 export const isEquationBasedQuestion = (question) => {
   const text = normalizeQuestionForSolver(question);
   if (!text) return false;
+
+  const exactText = String(question || "").trim();
+  const numericCount = countNumericValues(exactText);
+  const hasSolverSubject = SOLVER_SUPPORTED_SUBJECT_PATTERN.test(exactText);
+  const hasProblemIntent = DIRECT_GEMINI_PROBLEM_PATTERN.test(exactText);
+  const hasSubjectHint = GENERIC_SUBJECT_HINT_PATTERN.test(exactText);
+  const hasStructuredInput = STRUCTURED_SOLVER_INPUT_PATTERN.test(exactText);
+  const hasFormulaOrNotation =
+    DIRECT_GEMINI_SYMBOL_PATTERN.test(exactText) ||
+    /\b(?:sin|cos|tan|cot|sec|cosec|log|ln|sqrt|root|dy\/dx|dx\/dt)\b/i.test(exactText) ||
+    /[√πθλμΩω²³₀₁₂₃₄₅₆₇₈₉]/u.test(exactText);
+
+  if (
+    hasSolverSubject &&
+    (hasProblemIntent || hasSubjectHint || hasStructuredInput || hasFormulaOrNotation || numericCount > 0)
+  ) {
+    return true;
+  }
+
+  if (
+    (hasProblemIntent || hasStructuredInput) &&
+    (hasSubjectHint || hasFormulaOrNotation || numericCount >= 2)
+  ) {
+    return true;
+  }
 
   return (
     looksLikeTheorySubjectQuestion(text) ||
@@ -2710,6 +2762,11 @@ const buildGeneralAcademicSolverPrompt = ({ question, contextText, preferContext
 Your task is to answer the student's question accurately and completely.
 
 Important behavior:
+- Answer the exact given question.
+- Preserve all mathematical functions, scientific notation, accounting structures, tables, chemistry equations, diagrams, and subject-specific symbols.
+- Do not rewrite the question into a different simpler equation.
+- Never remove or alter functions such as sin, cos, tan, log, ln, roots, powers, fractions, subscripts, superscripts, units, chemistry notation, physics formulas, or accounting table structures.
+- Solve according to the actual subject context.
 - This system may provide textbook context, but the textbook may not always contain the exact answer.
 - ${preferContext ? "Use the textbook context as support whenever it is useful." : "Use the textbook context as optional support only if it helps."}
 - If the textbook does not provide a clear or complete answer, you must still generate the answer using your own subject knowledge.
@@ -2804,41 +2861,53 @@ const buildGenericSubjectGeminiPrompt = ({ question, contextText }) =>
     preferContext: false,
   });
 
-const extractGeminiText = (result) =>
-  normalizeGeminiAnswer(
-    result?.text ||
-      result?.candidates?.[0]?.content?.parts?.map((part) => part?.text || "").join("") ||
-      ""
-  );
+const IMAGE_QUESTION_SOLVER_PROMPT =
+  "You are an expert academic problem solver. Read the uploaded image carefully. The image may contain maths, physics, chemistry, accounts, commerce, table, graph, diagram, equation, or numerical problem. Answer the exact given question. Preserve all mathematical functions, scientific notation, accounting structures, tables, chemistry equations, diagrams, and subject-specific symbols. Do not rewrite the question into a different simpler equation. Solve according to the actual subject context. Generate accurate step-by-step answers and final answers. If the image is unclear, say what part is unclear instead of guessing.";
 
-const runGeminiPrompt = async (prompt) => {
+const extractGeminiText = (result) => {
+  const text = typeof result?.text === "function" ? result.text() : result?.text;
+  return normalizeGeminiAnswer(
+    text || result?.candidates?.[0]?.content?.parts?.map((part) => part?.text || "").join("") || ""
+  );
+};
+
+const runGeminiPrompt = async (prompt, models = GEMINI_SOLVER_MODELS) => {
   if (!ai) {
     console.error("Gemini solver error: ai is null. GEMINI_API_KEY may be missing or not loaded.");
     return "";
   }
 
-  try {
-    console.log("Gemini solver using model:", GEMINI_MODEL);
-    const result = await ai.models.generateContent({
-      model: GEMINI_MODEL,
-      contents: prompt,
-    });
-    console.log("Gemini solver raw response:", result);
-    return extractGeminiText(result);
-  } catch (error) {
-    console.error("Gemini solver error:", error);
-    return "";
+  let lastError = null;
+  for (const model of models) {
+    try {
+      console.log("GEMINI_SOLVER_MODEL_TRY", model);
+      const result = await ai.models.generateContent({
+        model,
+        contents: prompt,
+      });
+      const text = extractGeminiText(result);
+      console.log("GEMINI_SOLVER_MODEL_SUCCESS", model);
+      return text;
+    } catch (error) {
+      lastError = error;
+      console.error("GEMINI_SOLVER_MODEL_FAILED", model, error?.status || "", error?.message || error);
+    }
   }
+
+  console.error("GEMINI_SOLVER_ALL_MODELS_FAILED", lastError?.message || lastError);
+  return "";
 };
 
 export async function solveWithGeminiFromTextbook({ question, chunks = [], metadatas = [] }) {
-  console.log("GEMINI_SOLVER_FUNCTION_CALLED");
-  const solverQuestion = normalizeQuestionForSolver(question);
+  console.log("GEMINI_SOLVER_ROUTE_HIT");
+  console.log("GEMINI_SOLVER_TEXT_REQUEST");
+  const solverQuestion = String(question || "").trim();
+  const localQuestion = normalizeQuestionForSolver(question);
   const contextText = formatContextBlock({ chunks, metadatas }).trim() || "No relevant textbook context retrieved.";
-  const localAnswer = solveQuestionLocally(solverQuestion);
+  const localAnswer = solveQuestionLocally(localQuestion);
   const isAcademicSubjectQuestion =
     isEquationBasedQuestion(solverQuestion) ||
-    looksLikeTheorySubjectQuestion(solverQuestion) ||
+    looksLikeTheorySubjectQuestion(localQuestion) ||
     DIRECT_GEMINI_SUBJECT_PATTERN.test(solverQuestion) ||
     SUBJECT_THEORY_HINT_PATTERN.test(solverQuestion) ||
     GENERAL_ACADEMIC_SUBJECT_QUESTION_PATTERN.test(solverQuestion);
@@ -2849,7 +2918,7 @@ export async function solveWithGeminiFromTextbook({ question, chunks = [], metad
 
   if (!ai) {
     console.error("Gemini solver error: ai is null. Falling back without Gemini call.");
-    return localAnswer || STEM_NO_ANSWER_TEXT;
+    return localAnswer || SOLVER_TEMPORARY_FAILURE_TEXT;
   }
 
   const promptAttempts = [];
@@ -2877,5 +2946,52 @@ export async function solveWithGeminiFromTextbook({ question, chunks = [], metad
   }
 
   console.log("Gemini solver fallback triggered for question:", solverQuestion);
-  return localAnswer || STEM_NO_ANSWER_TEXT;
+  return localAnswer || SOLVER_TEMPORARY_FAILURE_TEXT;
+}
+
+export async function solveImageQuestionWithGemini({ imageBase64, mimeType, question }) {
+  console.log("GEMINI_SOLVER_ROUTE_HIT");
+  console.log("GEMINI_SOLVER_IMAGE_REQUEST");
+
+  if (!ai) {
+    throw new Error("Gemini API key is not configured");
+  }
+
+  if (!imageBase64 || !mimeType) {
+    throw new Error("Image data and MIME type are required");
+  }
+
+  const prompt = question
+    ? `${IMAGE_QUESTION_SOLVER_PROMPT}\n\nUser instruction: ${String(question).trim()}`
+    : IMAGE_QUESTION_SOLVER_PROMPT;
+
+  const contents = [
+    {
+      role: "user",
+      parts: [
+        { text: prompt },
+        createPartFromBase64(imageBase64, mimeType),
+      ],
+    },
+  ];
+
+  let lastError = null;
+  for (const model of GEMINI_IMAGE_MODELS) {
+    try {
+      console.log("GEMINI_SOLVER_MODEL_TRY", model);
+      const result = await ai.models.generateContent({
+        model,
+        contents,
+      });
+
+      console.log("GEMINI_SOLVER_MODEL_SUCCESS", model);
+      return extractGeminiText(result);
+    } catch (err) {
+      lastError = err;
+      console.error("GEMINI_SOLVER_MODEL_FAILED", model, err?.status || "", err?.message || err);
+    }
+  }
+
+  console.error("GEMINI_SOLVER_ALL_MODELS_FAILED", lastError?.message || lastError);
+  throw lastError || new Error("Gemini image solver failed");
 }

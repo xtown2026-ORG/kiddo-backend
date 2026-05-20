@@ -1,6 +1,7 @@
 import asyncHandler from "../../shared/asyncHandler.js";
 import { GoogleGenAI } from "@google/genai";
 import { routeRagQuestion } from "./subjectRouter.js";
+import { solveImageQuestionWithGemini } from "./geminiSolver.js";
 import {
   chunkText,
   textToSpeech,
@@ -127,6 +128,67 @@ const applyNoStoreHeaders = (res) => {
   res.setHeader("Pragma", "no-cache");
   res.setHeader("Expires", "0");
   res.setHeader("Surrogate-Control", "no-store");
+};
+
+const IMAGE_QUESTION_TEXT = "Uploaded image question";
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const IMAGE_DATA_URL_PATTERN = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/;
+const ALLOWED_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+const findUploadedImageFile = (req) => {
+  const files = req.files;
+
+  if (Array.isArray(files)) {
+    return files.find((file) => file?.buffer);
+  }
+
+  return (
+    req.file ||
+    files?.image?.[0] ||
+    files?.file?.[0] ||
+    files?.questionImage?.[0] ||
+    null
+  );
+};
+
+const parseImageDataPayload = (body = {}) => {
+  const rawImageData =
+    body.image_data ||
+    body.imageData ||
+    body.photo_data ||
+    body.photoData ||
+    body.image_base64 ||
+    body.imageBase64 ||
+    body.questionImage ||
+    body.image ||
+    body.base64 ||
+    body.data;
+
+  if (!rawImageData) {
+    return null;
+  }
+
+  console.log("IMAGE_BASE64_RECEIVED");
+
+  const rawText = String(rawImageData).trim();
+  const dataUrlMatch = rawText.match(IMAGE_DATA_URL_PATTERN);
+  const mimeType =
+    dataUrlMatch?.[1] || body.mime_type || body.mimeType || body.content_type || body.contentType;
+  const imageBase64 = dataUrlMatch?.[2] || rawText;
+
+  if (!ALLOWED_IMAGE_MIME_TYPES.has(String(mimeType || "").toLowerCase())) {
+    return null;
+  }
+
+  const imageBuffer = Buffer.from(imageBase64, "base64");
+  if (!imageBuffer.length || imageBuffer.length > MAX_IMAGE_BYTES) {
+    return null;
+  }
+
+  return {
+    imageBase64: imageBuffer.toString("base64"),
+    mimeType: String(mimeType).toLowerCase(),
+  };
 };
 
 const sanitizeTamilOutput = (value) => {
@@ -519,11 +581,45 @@ export const askQuestion = asyncHandler(async (req, res) => {
   const headerLanguage = req.headers["x-chat-language"];
   const queryLanguage = req.query.lang;
 
+  const uploadedFile = findUploadedImageFile(req);
+  if (uploadedFile) {
+    console.log("IMAGE_FILE_RECEIVED");
+  }
+
+  const imageInput = uploadedFile
+    ? {
+        imageBase64: uploadedFile.buffer.toString("base64"),
+        mimeType: uploadedFile.normalizedMimeType || uploadedFile.mimetype,
+      }
+    : parseImageDataPayload(payload);
+  const cleanedQuestion = question ? stripLanguageTag(question) : "";
+
+  if (imageInput) {
+    try {
+      const answer = await solveImageQuestionWithGemini({
+        ...imageInput,
+        question: cleanedQuestion,
+      });
+
+      return res.json({
+        question: cleanedQuestion || IMAGE_QUESTION_TEXT,
+        answer: answer || "I could not generate an answer from the image right now.",
+        sources: [],
+        source_type: "gemini",
+        filters_used: "image_gemini_solver",
+      });
+    } catch (err) {
+      console.error("IMAGE_QUESTION_SOLVER_ERROR", err?.message || err);
+      return res.status(500).json({
+        message: "I could not solve the uploaded image right now. Please try again in a moment.",
+      });
+    }
+  }
+
   if (!question) {
     return res.status(400).json({ message: "Question is required" });
   }
 
-  const cleanedQuestion = stripLanguageTag(question);
   const taggedLanguage = extractTaggedLanguage(question);
   let searchQuestion = stripLanguageInstructionForSearch(cleanedQuestion);
   const scopedBook =
@@ -681,4 +777,44 @@ export const speakText = asyncHandler(async (req, res) => {
   }
 
   res.end();
+});
+
+export const askImageQuestion = asyncHandler(async (req, res) => {
+  applyNoStoreHeaders(res);
+
+  try {
+    const uploadedFile = findUploadedImageFile(req);
+    const imageInput = uploadedFile
+      ? {
+          imageBase64: uploadedFile.buffer.toString("base64"),
+          mimeType: uploadedFile.normalizedMimeType || uploadedFile.mimetype,
+        }
+      : parseImageDataPayload(req.body);
+
+    if (!imageInput) {
+      return res.status(400).json({ message: "Image is required" });
+    }
+
+    if (uploadedFile) {
+      console.log("IMAGE_FILE_RECEIVED");
+    }
+
+    const answer = await solveImageQuestionWithGemini({
+      ...imageInput,
+      question: req.body?.question || req.body?.text || req.body?.message,
+    });
+
+    return res.json({
+      question: req.body?.question || IMAGE_QUESTION_TEXT,
+      answer: answer || "I could not generate an answer from the image right now.",
+      sources: [],
+      source_type: "gemini",
+      filters_used: "image_gemini_solver",
+    });
+  } catch (err) {
+    console.error("IMAGE_QUESTION_SOLVER_ERROR", err?.message || err);
+    return res.status(500).json({
+      message: "I could not solve the uploaded image right now. Please try again in a moment.",
+    });
+  }
 });
