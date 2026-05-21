@@ -165,12 +165,79 @@ export async function updateAssignment({ schoolId, assignmentId, updates }) {
     throw new AppError("Assignment not found", 404);
   }
 
-  // If trying to set as class teacher, check if section already has a class teacher
+  const nextTeacherId = updates.teacher_id ?? assignment.teacher_id;
+  const nextClassId = updates.class_id ?? assignment.class_id;
+  const nextSectionId = updates.section_id ?? assignment.section_id;
+  const nextSubjectId = updates.subject_id ?? assignment.subject_id;
+
+  if (
+    updates.teacher_id !== undefined ||
+    updates.class_id !== undefined ||
+    updates.section_id !== undefined ||
+    updates.subject_id !== undefined
+  ) {
+    const [teacher, cls, section, subject] = await Promise.all([
+      Teacher.findOne({
+        where: {
+          school_id: schoolId,
+          [Op.or]: [{ id: nextTeacherId }, { user_id: nextTeacherId }],
+        },
+      }),
+      Class.findOne({ where: { id: nextClassId, school_id: schoolId } }),
+      Section.findOne({
+        where: {
+          id: nextSectionId,
+          class_id: nextClassId,
+          school_id: schoolId,
+          is_active: true,
+        },
+      }),
+      Subject.findOne({ where: { id: nextSubjectId, school_id: schoolId } }),
+    ]);
+
+    if (!teacher) {
+      throw new AppError("TEACHER_NOT_FOUND", 404);
+    }
+    if (!cls) {
+      throw new AppError("CLASS_NOT_FOUND", 404);
+    }
+    if (!section) {
+      throw new AppError("SECTION_NOT_FOUND", 404);
+    }
+    if (!subject) {
+      throw new AppError("SUBJECT_NOT_FOUND", 404);
+    }
+
+    const duplicateAssignment = await TeacherAssignment.findOne({
+      where: {
+        school_id: schoolId,
+        teacher_id: teacher.id,
+        section_id: nextSectionId,
+        subject_id: nextSubjectId,
+        is_active: true,
+        id: { [Op.ne]: assignmentId },
+      },
+    });
+
+    if (duplicateAssignment) {
+      throw new AppError(
+        "Teacher already assigned to this subject in this section",
+        409
+      );
+    }
+
+    updates.teacher_id = teacher.id;
+    updates.class_id = nextClassId;
+    updates.section_id = nextSectionId;
+    updates.subject_id = nextSubjectId;
+  }
+
+  // If trying to set as class teacher, check if target section already has a class teacher
   if (updates.is_class_teacher === true) {
     const existingClassTeacher = await TeacherAssignment.findOne({
       where: {
         school_id: schoolId,
-        section_id: assignment.section_id,
+        section_id: nextSectionId,
         is_class_teacher: true,
         is_active: true,
         id: { [Op.ne]: assignmentId }, // Exclude current assignment

@@ -135,6 +135,237 @@ function fallbackQuizQuestions(topic, classLevel, count, language = "English") {
   const topicLc = String(topic || "").toLowerCase();
   const isMathLike = /(algebra|geometry|equation|fraction|ratio|decimal|percent|trigonometry|calculus)/i.test(topicLc);
   const isScienceLike = /(photosynthesis|atom|cell|force|energy|electric|gravity|plant|human body|ecosystem|chemical|physics|biology|chemistry)/i.test(topicLc);
+  const isSportsLike = /(football|soccer|cricket|hockey|basketball|volleyball|tennis|badminton|kabaddi|sport|sports)/i.test(topicLc);
+  const isFootballLike = /(football|soccer)/i.test(topicLc);
+  const isCricketLike = /(cricket)/i.test(topicLc);
+
+  if (isFootballLike) {
+    const footballRows = [
+      makeQuestion(
+        `How many players are usually on the field for one football team at a time?`,
+        `11 players`,
+        `7 players`,
+        `9 players`,
+        `15 players`,
+        0
+      ),
+      makeQuestion(
+        `What is the main objective in football?`,
+        `To score goals by sending the ball into the opponent's net`,
+        `To carry the ball with both hands across the line`,
+        `To hit the ball over a high net`,
+        `To knock down the opponent's wickets`,
+        1
+      ),
+      makeQuestion(
+        `Which player is allowed to use hands inside the penalty area in football?`,
+        `Goalkeeper`,
+        `Defender`,
+        `Midfielder`,
+        `Striker`,
+        2
+      ),
+      makeQuestion(
+        `What happens when the ball completely crosses the sideline in football?`,
+        `A throw-in is awarded`,
+        `A penalty is awarded automatically`,
+        `The match ends`,
+        `A goal is counted`,
+        3
+      ),
+      makeQuestion(
+        `Which body part is mainly used to control and pass the ball in football?`,
+        `Feet`,
+        `Hands`,
+        `Bat`,
+        `Racket`,
+        4
+      ),
+      makeQuestion(
+        `What is a penalty kick in football?`,
+        `A direct shot at goal taken from the penalty mark after a foul`,
+        `A free goal awarded without a shot`,
+        `A goal scored from outside the stadium`,
+        `A kick used only at the start of the match`,
+        5
+      ),
+      makeQuestion(
+        `Which tournament is the most famous international football competition?`,
+        `FIFA World Cup`,
+        `Wimbledon`,
+        `Thomas Cup`,
+        `Davis Cup`,
+        6
+      ),
+      makeQuestion(
+        `Which card usually means a player must leave the field immediately?`,
+        `Red card`,
+        `Green card`,
+        `Blue card`,
+        `White card`,
+        7
+      ),
+      makeQuestion(
+        `What is the place called where the football match is played?`,
+        `Pitch`,
+        `Court`,
+        `Track`,
+        `Pool`,
+        8
+      ),
+      makeQuestion(
+        `What is offside in football mainly related to?`,
+        `An attacking player being in an unfair forward position`,
+        `The ball going outside the stadium`,
+        `A goalkeeper changing gloves`,
+        `A team having too many substitutions`,
+        9
+      ),
+    ];
+
+    return footballRows.slice(0, Math.max(safeCount * 3, 10));
+  }
+
+  if (isCricketLike) {
+    const cricketRows = [
+      makeQuestion(
+        `How many players are there in one cricket team?`,
+        `11 players`,
+        `7 players`,
+        `9 players`,
+        `15 players`,
+        0
+      ),
+      makeQuestion(
+        `What is the main aim of the batting team in cricket?`,
+        `To score as many runs as possible`,
+        `To score goals into a net`,
+        `To throw the ball out of the stadium every time`,
+        `To stop the match clock`,
+        1
+      ),
+      makeQuestion(
+        `What is the set of three vertical stumps with two bails called in cricket?`,
+        `Wicket`,
+        `Goalpost`,
+        `Baseline`,
+        `Touchline`,
+        2
+      ),
+      makeQuestion(
+        `How many runs are awarded when the ball crosses the boundary after touching the ground?`,
+        `4 runs`,
+        `2 runs`,
+        `5 runs`,
+        `6 runs`,
+        3
+      ),
+      makeQuestion(
+        `How many runs are awarded when the ball crosses the boundary without touching the ground?`,
+        `6 runs`,
+        `3 runs`,
+        `4 runs`,
+        `1 run`,
+        4
+      ),
+      makeQuestion(
+        `Which player delivers the ball to the batter in cricket?`,
+        `Bowler`,
+        `Goalkeeper`,
+        `Defender`,
+        `Referee`,
+        5
+      ),
+      makeQuestion(
+        `What is LBW in cricket?`,
+        `Leg Before Wicket`,
+        `Long Boundary Win`,
+        `Last Batting Warning`,
+        `Line Ball Wide`,
+        6
+      ),
+      makeQuestion(
+        `What is the rectangular area in the center of the field called in cricket?`,
+        `Pitch`,
+        `Court`,
+        `Track`,
+        `Penalty box`,
+        7
+      ),
+      makeQuestion(
+        `Who is the famous international tournament winner decided in the Cricket World Cup?`,
+        `National cricket teams`,
+        `Club football teams`,
+        `Only school teams`,
+        `Tennis doubles pairs`,
+        8
+      ),
+      makeQuestion(
+        `What is a wide ball in cricket?`,
+        `A ball bowled too far from the batter to hit fairly`,
+        `A ball that counts as six runs automatically`,
+        `A ball that ends the innings immediately`,
+        `A ball hit behind the wicket`,
+        9
+      ),
+    ];
+
+    return cricketRows.slice(0, Math.max(safeCount * 3, 10));
+  }
+
+  if (isSportsLike) {
+    const sportName = String(topic || "sports").trim();
+    const sportRows = [
+      makeQuestion(
+        `Which statement is correct about ${sportName}?`,
+        `${sportName} is a recognized sport with its own rules and gameplay.`,
+        `${sportName} is not played using any rules.`,
+        `${sportName} never involves teams or players.`,
+        `${sportName} has no scoring system in any form.`,
+        0
+      ),
+      makeQuestion(
+        `What is usually important in ${sportName}?`,
+        `Knowing the rules, skills, and scoring method`,
+        `Ignoring the rules completely`,
+        `Playing without any objective`,
+        `Ending the match without competition`,
+        1
+      ),
+      makeQuestion(
+        `Why do players practice ${sportName}?`,
+        `To improve skill, coordination, and match performance`,
+        `To avoid learning the rules`,
+        `To reduce teamwork in the game`,
+        `To remove scoring from the sport`,
+        2
+      ),
+      makeQuestion(
+        `Which is most likely part of ${sportName}?`,
+        `Players, rules, scoring, and competition`,
+        `No players and no rules`,
+        `Only textbooks and no gameplay`,
+        `No winner, no goal, and no skill`,
+        3
+      ),
+    ];
+
+    while (sportRows.length < Math.max(safeCount * 3, 10)) {
+      const seed = sportRows.length;
+      sportRows.push(
+        makeQuestion(
+          `What should a student know first about ${sportName}?`,
+          `The basic rules and how points or results are decided`,
+          `Only the color of the uniform`,
+          `Nothing about the game format`,
+          `How to play without following any rule`,
+          seed
+        )
+      );
+    }
+
+    return sportRows.slice(0, Math.max(safeCount * 3, 10));
+  }
 
   const templateFactories = [
     (seed) => makeQuestion(
@@ -342,6 +573,45 @@ function dedupeQuestions(questions = [], blockedQuestionTexts = []) {
   return unique;
 }
 
+function sanitizeAiQuestions(questions = []) {
+  return (Array.isArray(questions) ? questions : [])
+    .map((question) => {
+      const rawOptions = Array.isArray(question?.options) ? question.options : [];
+      const cleanedOptions = rawOptions
+        .map((option) => String(option || "").trim())
+        .filter(Boolean)
+        .slice(0, 4);
+
+      const uniqueOptions = Array.from(new Set(cleanedOptions));
+      while (uniqueOptions.length < 4) {
+        uniqueOptions.push(`Option ${String.fromCharCode(65 + uniqueOptions.length)}`);
+      }
+
+      const rawCorrectIndex =
+        question?.correct_option_index !== undefined
+          ? Number(question.correct_option_index)
+          : Number(question?.correct_index);
+
+      const safeCorrectIndex =
+        Number.isInteger(rawCorrectIndex) && rawCorrectIndex >= 0 && rawCorrectIndex < uniqueOptions.length
+          ? rawCorrectIndex
+          : 0;
+
+      return {
+        question_text: String(question?.question_text || question?.question || "").trim(),
+        options: uniqueOptions,
+        correct_option_index: safeCorrectIndex,
+      };
+    })
+    .filter(
+      (question) =>
+        question.question_text &&
+        Array.isArray(question.options) &&
+        question.options.length === 4 &&
+        question.options.every((option) => option)
+    );
+}
+
 function buildQuestionReview(question, selectedIndex) {
   const selectedOptionIndex =
     typeof selectedIndex === "number" ? selectedIndex : null;
@@ -489,7 +759,7 @@ export async function generateQuizFromAi({
   }
 
   const preparedQuestions = fillMissingQuestions({
-    questions: dedupeQuestions(parsed.questions, previouslyAskedQuestionTexts),
+    questions: dedupeQuestions(sanitizeAiQuestions(parsed.questions), previouslyAskedQuestionTexts),
     topic,
     classLevel: safeClassLevel,
     count: safeNumQuestions,
