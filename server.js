@@ -115,7 +115,11 @@ import attendanceSummaryRoutes from "./src/modules/attendance/attendance.summary
 import attendanceAnalyticsRoutes from "./src/modules/attendance/attendance.analytics.routes.js";
 
 import ragRoutes from "./src/modules/rag/rag.routes.js";
+
 import aiChatRoutes from "./src/modules/ai-chat/ai-chat.routes.js";
+
+import aiFollowupRoutes from "./src/modules/ai-followup/aiFollowup.routes.js";
+
 import teacherAiRoutes from "./src/modules/teacher-ai/teacher-ai.routes.js";
 import aiTestAssignmentRoutes from "./src/modules/ai-test-assignments/ai-test-assignment.routes.js";
 import aiAnalyticsRoutes from "./src/modules/ai-analytics/ai-analytics.routes.js";
@@ -205,8 +209,13 @@ app.use("/api", subscriptionRoutes);
 app.use("/api", tokenRoutes);
 
 // AI
+<<<<<<< HEAD
 app.use("/api/ai-chat", aiChatRoutes);
 app.use("/api/rag", ragRoutes);
+=======
+app.use("/api/rag", ragRoutes);
+app.use("/api/ai-followup", aiFollowupRoutes);
+>>>>>>> 9f28db5d (ai chat update)
 app.use("/api", teacherAiRoutes);
 app.use("/api", aiTestAssignmentRoutes);
 app.use("/api", aiAnalyticsRoutes);
