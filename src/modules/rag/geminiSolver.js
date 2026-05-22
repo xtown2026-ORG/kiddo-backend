@@ -73,6 +73,77 @@ const GENERAL_ACADEMIC_SUBJECT_QUESTION_PATTERN =
 const SUBJECT_THEORY_HINT_PATTERN =
   /\b(algebra|geometry|triangle|circle|quadrilateral|polynomial|quadratic|factorisation|inequality|equation|theorem|coordinate\s+geometry|arithmetic\s+progression|probability|statistics|mean|median|mode|set|sets|subset|superset|union|intersection|venn|sin|cos|tan|cot|sec|cosec|trigonometric|identity|log|ln|ohm'?s\s+law|newton'?s\s+laws?|work|energy|power|force|motion|speed|velocity|acceleration|current|voltage|resistance|magnetism|reflection|refraction|lens|mirror|wave|sound|light|photoelectric|atom|molecule|element|compound|mixture|valency|electron|proton|neutron|acid|base|salt|ph|periodic\s+table|chemical\s+bond|oxidation|reduction|molarity|mole\s+concept|journal|ledger|trial\s+balance|balance\s+sheet|debit|credit|capital|liability|asset|revenue|expense|depreciation|interest|discount|profit|loss|business|trade|commerce|market|demand|supply|consumer|producer|goodwill|partnership|shares?|debentures?|gst|inventory|stock|cash\s+book|bills?\s+of\s+exchange)\b/i;
 
+const STRICT_DERIVATION_PROMPT = `
+You are a strict mathematical derivation engine.
+
+IMPORTANT RULES:
+- Return ONLY derivation equations.
+- DO NOT explain steps.
+- DO NOT teach concepts.
+- DO NOT use bullet points.
+- DO NOT use paragraph explanations.
+- DO NOT describe operations.
+- DO NOT use phrases like:
+  "Distribute"
+  "Combine like terms"
+  "Subtract both sides"
+  "Simplify"
+  "Therefore"
+  "We get"
+
+OUTPUT FORMAT:
+
+Step 1:
+[equation]
+
+Step 2:
+[equation]
+
+Step 3:
+[equation]
+
+...
+
+Final Answer:
+[final result only]
+
+RULES:
+- Every step must be a mathematical transformation only.
+- Keep output compact.
+- Use proper mathematical notation.
+- Use fractions properly.
+- No extra text before or after the derivation.
+- No markdown explanations.
+
+EXAMPLE:
+
+Step 1:
+4(3x-2)+5=2(x+7)+3x
+
+Step 2:
+12x-8+5=2x+14+3x
+
+Step 3:
+12x-3=5x+14
+
+Step 4:
+12x-5x=14+3
+
+Step 5:
+7x=17
+
+Step 6:
+x=17/7
+
+Final Answer:
+x=17/7
+`.trim();
+
+const STRICT_DERIVATION_INTENT_PATTERN =
+  /\b(solve|calculate|find|determine|evaluate|compute|simplify|derive|verify|prove|show\s+that|factor|expand|equation|numerical)\b/i;
+const STRICT_DERIVATION_NOTATION_PATTERN =
+  /(?:=|<=|>=|<|>|√|π|²|³|[+\-*/^()]|\\frac|\\sin|\\cos|\\tan|\b(?:sin|cos|tan|cot|sec|cosec|log|ln|sqrt)\b)/i;
+
 const EQUATION_QUESTION_PATTERNS = [
   /\bcalculate\b/i,
   /\bevaluate\b/i,
@@ -321,6 +392,13 @@ export const isEquationBasedQuestion = (question) => {
     (GENERAL_ACADEMIC_SUBJECT_QUESTION_PATTERN.test(text) &&
       (DIRECT_GEMINI_SUBJECT_PATTERN.test(text) || SUBJECT_THEORY_HINT_PATTERN.test(text)))
   );
+};
+
+const isStrictDerivationQuestion = (question) => {
+  const text = normalizeQuestionForSolver(question);
+  if (!text) return false;
+
+  return STRICT_DERIVATION_INTENT_PATTERN.test(text) && STRICT_DERIVATION_NOTATION_PATTERN.test(text);
 };
 
 const buildBasicStemAnswer = ({ formula, given, substitution, calculation, finalAnswer }) =>
@@ -2819,6 +2897,12 @@ const buildStemSolverPrompt = ({ question, contextText }) =>
     preferContext: true,
   });
 
+const buildStrictDerivationPrompt = ({ question }) => `${STRICT_DERIVATION_PROMPT}
+
+Question:
+${question}
+`;
+
 const buildDirectNumericalSolverPrompt = ({ question }) =>
   buildGeneralAcademicSolverPrompt({
     question,
@@ -2922,6 +3006,9 @@ export async function solveWithGeminiFromTextbook({ question, chunks = [], metad
   }
 
   const promptAttempts = [];
+  if (isStrictDerivationQuestion(solverQuestion)) {
+    promptAttempts.push(buildStrictDerivationPrompt({ question: solverQuestion }));
+  }
   if (hasMeaningfulTextbookContext({ chunks })) {
     promptAttempts.push(buildContextFirstBookPrompt({ question: solverQuestion, contextText }));
   }

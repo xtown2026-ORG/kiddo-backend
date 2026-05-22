@@ -209,13 +209,12 @@ app.use("/api", subscriptionRoutes);
 app.use("/api", tokenRoutes);
 
 // AI
-<<<<<<< HEAD
+
 app.use("/api/ai-chat", aiChatRoutes);
 app.use("/api/rag", ragRoutes);
-=======
 app.use("/api/rag", ragRoutes);
 app.use("/api/ai-followup", aiFollowupRoutes);
->>>>>>> 9f28db5d (ai chat update)
+
 app.use("/api", teacherAiRoutes);
 app.use("/api", aiTestAssignmentRoutes);
 app.use("/api", aiAnalyticsRoutes);
