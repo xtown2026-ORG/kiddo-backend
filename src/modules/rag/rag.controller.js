@@ -2,6 +2,7 @@ import asyncHandler from "../../shared/asyncHandler.js";
 import { GoogleGenAI } from "@google/genai";
 import { routeRagQuestion } from "./subjectRouter.js";
 import { solveImageQuestionWithGemini } from "./geminiSolver.js";
+import { buildStudentFollowupSuggestions } from "../ai-followup/aiFollowup.service.js";
 import {
   chunkText,
   textToSpeech,
@@ -441,6 +442,11 @@ const normalizeClassLevel = (value) => {
   return str.replace(/^class\s*/, "");
 };
 
+const shouldAttachStudentFollowups = ({ userRole, question, answer }) =>
+  userRole === "student" &&
+  String(question || "").trim() &&
+  String(answer || "").trim();
+
 const normalizeFollowUpComparable = (value) =>
   String(value || "")
     .toLowerCase()
@@ -714,10 +720,22 @@ export const askQuestion = asyncHandler(async (req, res) => {
       tokensUsed: result?.tokens_used || 0,
     });
 
+    const followupSuggestions = shouldAttachStudentFollowups({
+      userRole: req.user?.role,
+      question: cleanedQuestion,
+      answer: textAnswer,
+    })
+      ? buildStudentFollowupSuggestions({
+          originalQuestion: cleanedQuestion,
+          previousAnswer: textAnswer,
+        })
+      : [];
+
     return res.json({
       question: cleanedQuestion,
       answer: textAnswer,
       sources: result.sources,
+      ...(followupSuggestions.length ? { followupSuggestions } : {}),
       ...(result.billing_warning ? { billing_warning: result.billing_warning } : {}),
     });
   }
