@@ -3,6 +3,7 @@ import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
 import dotenv from "dotenv";
+import path from "path";
 dotenv.config();
 
 import db from "./src/config/db.js";
@@ -77,6 +78,10 @@ app.use(cors({
 app.use(express.json({ limit: "10mb" }));
 app.use(helmet());
 app.use(morgan("dev"));
+app.use(
+  "/uploads/ai-followups",
+  express.static(path.join(process.cwd(), "uploads", "ai-followups"))
+);
 
 
 // HEALTH CHECK
