@@ -8,6 +8,7 @@ import Section from "../sections/section.model.js";
 import AppError from "../../shared/appError.js";
 import { getPagination } from "../../shared/utils/pagination.js";
 import TeacherClassSession from "../teacher-class-sessions/teacher-class-session.model.js";
+import { listApprovedParentLinks } from "../parents/parent.family.service.js";
 
 /* =========================
    TEACHER: MARK ATTENDANCE
@@ -151,17 +152,20 @@ export const getTeacherAttendanceSummaryService = async ({
 ========================= */
 export const getParentAttendanceSummaryService = async ({
   parent_user_id,
+  school_id,
   query,
 }) => {
   const { limit, offset } = getPagination(query);
   const { from_date, to_date, student_id } = query || {};
 
-  const links = await Parent.findAll({
-    where: { user_id: parent_user_id, approval_status: "approved" },
-    attributes: ["student_id"],
+  const links = await listApprovedParentLinks({
+    parent_user_id,
+    school_id,
   });
 
-  let studentIds = links.map((l) => l.student_id);
+  let studentIds = links
+    .map((l) => Number(l.student_id))
+    .filter(Number.isFinite);
   if (student_id) {
     studentIds = studentIds.filter((id) => Number(id) === Number(student_id));
   }

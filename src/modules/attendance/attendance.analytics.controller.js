@@ -27,6 +27,7 @@ export const getParentAttendanceAnalytics = async (req, res, next) => {
   try {
     const result = await getParentAttendanceAnalyticsService({
       parent_user_id: req.user.id,
+      school_id: req.user.school_id,
       query: req.query,
     });
 

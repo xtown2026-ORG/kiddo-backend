@@ -6,6 +6,7 @@ import {
   listParentsService,
   listParentOptionsService,
 } from "./parent.service.js";
+import { listApprovedParentLinks } from "./parent.family.service.js";
 
 /* =========================
    ADMIN
@@ -105,54 +106,58 @@ export const updateParentProfile = async (req, res, next) => {
 
 export const getMyProfile = async (req, res, next) => {
   try {
-    const Parent = (await import("./parent.model.js")).default;
     const User = (await import("../users/user.model.js")).default;
-    const Student = (await import("../students/student.model.js")).default;
-    const Class = (await import("../classes/classes.model.js")).default;
-    const Section = (await import("../sections/section.model.js")).default;
-
-    const parent = await Parent.findOne({
-      where: { user_id: req.user.id },
-      include: [
-        {
-          model: User,
-          required: false,
-        },
-        {
-          model: Student,
-          required: false,
-          include: [
-            {
-              model: User,
-              required: false,
-            },
-            {
-              model: Class,
-              required: false,
-            },
-            {
-              model: Section,
-              required: false,
-            },
-          ],
-        },
+    const parentUser = await User.findByPk(req.user.id, {
+      attributes: [
+        "id",
+        "role",
+        "school_id",
+        "username",
+        "name",
+        "phone",
+        "email",
+        "avatar_url",
+        "first_login",
+        "is_active",
       ],
     });
 
-    if (!parent) {
+    if (!parentUser) {
       return res.json(req.user);
     }
 
-    const parentData = parent.toJSON();
-    const parentUser = parentData.user || {};
-    const linkedStudentUser = parentData.student?.user || {};
+    const links = await listApprovedParentLinks({
+      parent_user_id: req.user.id,
+      school_id: req.user.school_id,
+      includeStudentDetails: true,
+    });
+
+    const uniqueStudents = [];
+    const seenStudentIds = new Set();
+
+    for (const link of links) {
+      const student = (link.student ?? link.Student)?.toJSON?.() || (link.student ?? link.Student);
+      const studentId = Number(student?.id);
+      if (!Number.isFinite(studentId) || seenStudentIds.has(studentId)) continue;
+      seenStudentIds.add(studentId);
+      uniqueStudents.push(student);
+    }
+
+    const linkedStudentUser =
+      uniqueStudents[0]?.user ||
+      uniqueStudents[0]?.User ||
+      {};
     const resolvedPhone = parentUser.phone || linkedStudentUser.phone || "";
+    const primaryStudent = uniqueStudents[0] || null;
 
     res.json({
-      ...parentData,
+      ...parentUser.toJSON(),
+      relation_type: links[0]?.relation_type || "guardian",
+      student: primaryStudent,
+      linked_students: uniqueStudents,
       phone: resolvedPhone,
       user: {
-        ...parentUser,
+        ...parentUser.toJSON(),
         phone: resolvedPhone,
       },
     });

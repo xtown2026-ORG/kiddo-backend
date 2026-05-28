@@ -11,9 +11,17 @@ export const createAiFollowup = async (req, res) => {
     return res.json(result);
   } catch (err) {
     const statusCode = err?.statusCode || 500;
-    console.error("AI_FOLLOWUP_ERROR", err?.message || err);
+
+    console.error(
+      "AI_FOLLOWUP_ERROR",
+      err?.message || err
+    );
+
     return res.status(statusCode).json({
-      message: statusCode === 500 ? "Failed to generate follow-up answer" : err.message,
+      message:
+        statusCode === 500
+          ? "Failed to generate follow-up answer"
+          : err.message,
     });
   }
 };

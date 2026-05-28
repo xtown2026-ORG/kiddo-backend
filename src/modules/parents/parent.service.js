@@ -5,6 +5,7 @@ import Parent from "./parent.model.js";
 import Student from "../students/student.model.js";
 import AppError from "../../shared/appError.js";
 import { getPagination } from "../../shared/utils/pagination.js";
+import { resolveParentFamilyUserIds } from "./parent.family.service.js";
 
 /* =========================
    ADMIN: CREATE PARENT + LINK
@@ -162,8 +163,25 @@ export const updateParentProfileService = async (user_id, data) => {
     });
 
     if (existingPhoneUser) {
+      const familyUserIds = await resolveParentFamilyUserIds({
+        parent_user_id: user_id,
+        school_id: user.school_id,
+      });
+
+      if (
+        existingPhoneUser.role === "parent" &&
+        Number(existingPhoneUser.school_id) === Number(user.school_id)
+      ) {
+        sharedLinkedStudentPhone = true;
+      }
+
       const links = await Parent.findAll({
-        where: { user_id },
+        where: {
+          user_id:
+            familyUserIds.length > 1
+              ? { [Op.in]: familyUserIds }
+              : familyUserIds[0] || user_id,
+        },
         attributes: ["student_id"],
       });
 
@@ -186,11 +204,11 @@ export const updateParentProfileService = async (user_id, data) => {
         );
       }
 
-      if (!allowedLinkedStudent) {
+      if (!allowedLinkedStudent && !sharedLinkedStudentPhone) {
         throw new AppError("Phone already in use", 400);
       }
 
-      sharedLinkedStudentPhone = allowedLinkedStudent;
+      sharedLinkedStudentPhone = sharedLinkedStudentPhone || allowedLinkedStudent;
     }
   }
 

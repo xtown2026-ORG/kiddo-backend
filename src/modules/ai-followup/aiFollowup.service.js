@@ -44,7 +44,7 @@ const GEMINI_IMAGE_MODEL = (
 
 const GEMINI_IMAGE_PREVIEW_MODEL = (
   process.env.GEMINI_IMAGE_PREVIEW_MODEL ||
-  "gemini-3.1-flash-image-preview"
+  "gemini-3-pro-image-preview"
 ).replace(/^models\//, "");
 
 const ai = new GoogleGenAI({
@@ -54,6 +54,25 @@ const ai = new GoogleGenAI({
 const normalizeText = (value) =>
   String(value || "").trim();
 
+const FOLLOWUP_SUGGESTION_CONFIG = [
+  {
+    label: "Explain with Example",
+    followupType: "example",
+  },
+  {
+    label: "Step by Step",
+    followupType: "step_by_step",
+  },
+  {
+    label: "Explain Picture",
+    followupType: "picture",
+  },
+  {
+    label: "Short Summary",
+    followupType: "short_summary",
+  },
+];
+
 const getTopicText = (question) =>
   normalizeText(question)
     .replace(
@@ -61,6 +80,213 @@ const getTopicText = (question) =>
       ""
     )
     .replace(/[?.!]+$/g, "");
+
+const isBiologyTopic = (topic = "") =>
+  /\b(biology|cell|tissue|organ|organism|plant|animal|human body|digestive|respiratory|circulatory|nervous system|photosynthesis|reproduction|genetics|dna|rna|chromosome|bacteria|virus|fungi|protozoa|ecosystem|food chain|taxonomy|phylum|chordata|hemichordata|prokaryotic|eukaryotic|membrane|mitochondria|nucleus)\b/i.test(
+    normalizeText(topic)
+  );
+
+const buildEducationalImagePrompt = (topic) => {
+  if (isBiologyTopic(topic)) {
+    return `
+Create a professional textbook-quality educational biology infographic poster on "${topic}".
+
+Design requirements:
+- Ultra clean scientific illustration
+- White background
+- High-resolution educational poster
+- Accurate biological structures
+- Professional textbook layout
+- Student-friendly infographic design
+- Balanced spacing and alignment
+- Properly aligned labels
+- Thin annotation arrows
+- Modern educational color palette
+- Soft scientific colors
+- Crisp vector-style illustration
+- Sharp readable text
+- No spelling mistakes
+- No distorted text
+- No overlapping labels
+- High-detail scientific drawing
+- Professional biology atlas style
+- Exam preparation format
+- Printable academic poster
+- Clean section borders
+- Symmetrical composition
+- Consistent typography
+- Educational publishing quality
+
+Include:
+1. Main labeled diagram
+2. Identify and label section
+3. Key features box
+4. Short-answer questions section
+5. Quick comparison table if applicable
+
+Label style:
+- Straight annotation lines
+- Proper spacing between labels
+- Horizontal readable text
+- Scientific naming format
+- Consistent font size
+
+Output style:
+- Biology textbook infographic
+- Scientific educational chart
+- CBSE/NEET exam style poster
+- Professional academic illustration
+- Museum-quality biology artwork
+
+Quality rules:
+- Ultra HD
+- 4K quality
+- Sharp outlines
+- Clean vector finish
+- Accurate anatomy
+- High readability
+- Print-ready poster
+- Professional infographic composition
+
+Negative instructions:
+- No blurry text
+- No distorted labels
+- No overlapping annotations
+- No messy layout
+- No low-quality rendering
+- No extra unnecessary objects
+- No dark background
+- No cartoon style
+- No watermark
+- No cropped labels
+`;
+  }
+
+  return `
+High quality educational textbook diagram of ${topic}, labeled structure, arrows, white background, clean scientific illustration, student friendly, highly detailed, educational poster style, biology textbook quality, 4k.
+
+IMPORTANT:
+- Use REALISTIC educational visuals
+- Use science textbook infographic style
+- White background
+- Educational arrows
+- Minimal text
+- Student-friendly
+- Professional educational design
+- Landscape layout
+
+STRICTLY AVOID:
+- SVG style
+- Text boxes
+- UI cards
+- Flowchart blocks
+- Summary cards
+- Mind maps
+- Concept diagrams
+
+If topic is food chain:
+show realistic:
+- grass
+- grasshopper
+- frog
+- snake
+- eagle
+- fungi and earthworms
+
+Make it look like a real school science textbook infographic.
+`;
+};
+
+const buildPictureFallbackAnswer = ({
+  originalQuestion,
+  previousAnswer,
+}) => `
+Visual Explanation:
+Picture this like a clean textbook diagram of ${getTopicText(
+  originalQuestion
+)} on a white background.
+
+- Put the main title at the top.
+- Place the central structure in the middle.
+- Add clear labels on the sides with straight arrows pointing to each part.
+- Keep related parts grouped neatly.
+- Show the flow or function in the correct order from left to right or top to bottom.
+- Highlight the most important terms students should remember.
+
+Text Explanation:
+${previousAnswer}
+`.trim();
+
+const PREVIEW_IMAGE_MODELS = [
+  GEMINI_IMAGE_PREVIEW_MODEL,
+  "gemini-3-pro-image-preview",
+].filter(Boolean);
+
+const IMAGE_GENERATION_MODELS = [
+  GEMINI_IMAGE_MODEL,
+  "imagen-4.0-fast-generate-001",
+].filter(Boolean);
+
+const getBase64ImageFromInteraction = (
+  interaction
+) => {
+  const outputs = Array.isArray(
+    interaction?.outputs
+  )
+    ? interaction.outputs
+    : [];
+
+  for (const output of outputs) {
+    if (output?.type !== "image") {
+      continue;
+    }
+
+    if (output?.data) {
+      return output.data;
+    }
+
+    if (
+      output?.inlineData?.data
+    ) {
+      return output.inlineData.data;
+    }
+
+    if (
+      output?.image?.imageBytes
+    ) {
+      return output.image.imageBytes;
+    }
+  }
+
+  return "";
+};
+
+const getBase64ImageFromGeneratedImages =
+  (response) => {
+    const generatedImages =
+      Array.isArray(
+        response?.generatedImages
+      )
+        ? response.generatedImages
+        : [];
+
+    for (const generatedImage of generatedImages) {
+      if (
+        generatedImage?.image?.imageBytes
+      ) {
+        return generatedImage.image
+          .imageBytes;
+      }
+
+      if (
+        generatedImage?.imageBytes
+      ) {
+        return generatedImage.imageBytes;
+      }
+    }
+
+    return "";
+  };
 
 const toImageDataUrl = (bytes) => {
   return `data:image/png;base64,${Buffer.from(
@@ -256,136 +482,113 @@ const getTopicText = (originalQuestion) => {
 };
 >>>>>>> 28bcb484 (pwa)
 
-    const prompt = `
-Create a realistic educational textbook infographic for "${topic}".
-
-IMPORTANT:
-- Use REALISTIC educational visuals
-- Use REAL animal and nature images
-- Use science textbook infographic style
-- White background
-- Educational arrows
-- Minimal text
-- Student-friendly
-- Professional educational design
-- Landscape layout
-
-STRICTLY AVOID:
-- SVG style
-- Text boxes
-- UI cards
-- Flowchart blocks
-- Summary cards
-- Mind maps
-- Concept diagrams
-
-If topic is food chain:
-show realistic:
-- grass
-- grasshopper
-- frog
-- snake
-- eagle
-- fungi and earthworms
-
-Make it look like a real school science textbook infographic.
-`;
-
-    try {
-      console.log(
-        "START_IMAGE_GENERATION_INTERACTION"
+    const prompt =
+      buildEducationalImagePrompt(
+        topic
       );
 
-      const interaction =
-        await ai.interactions.create({
-          model:
-            GEMINI_IMAGE_PREVIEW_MODEL,
-          input: prompt,
-          response_modalities: [
-            "image",
-          ],
-        });
-
-      const imageOutput =
-        interaction?.outputs?.find(
-          (output) =>
-            output?.type === "image" &&
-            output?.data
+    for (const model of PREVIEW_IMAGE_MODELS) {
+      try {
+        console.log(
+          "START_IMAGE_GENERATION_INTERACTION",
+          model
         );
 
-      if (!imageOutput?.data) {
-        throw new Error(
-          "No image data returned from Gemini interaction"
+        const interaction =
+          await ai.interactions.create({
+            model,
+            input: prompt,
+            response_modalities: [
+              "image",
+            ],
+          });
+
+        const imageData =
+          getBase64ImageFromInteraction(
+            interaction
+          );
+
+        if (!imageData) {
+          throw new Error(
+            "No image data returned from Gemini interaction"
+          );
+        }
+
+        console.log(
+          "IMAGE_INTERACTION_RESPONSE_SUCCESS",
+          model
+        );
+
+        return await writeGeneratedImage({
+          originalQuestion,
+          previousAnswer,
+          bytes: Buffer.from(
+            imageData,
+            "base64"
+          ),
+        });
+      } catch (err) {
+        console.error(
+          "IMAGE_INTERACTION_ERROR:",
+          model,
+          err?.message || err
         );
       }
-
-      console.log(
-        "IMAGE_INTERACTION_RESPONSE_SUCCESS"
-      );
-
-      return await writeGeneratedImage({
-        originalQuestion,
-        previousAnswer,
-        bytes: Buffer.from(
-          imageOutput.data,
-          "base64"
-        ),
-      });
-    } catch (err) {
-      console.error(
-        "IMAGE_INTERACTION_ERROR:",
-        err?.message || err
-      );
     }
 
-    try {
-      console.log(
-        "START_IMAGE_GENERATION_MODEL"
-      );
+    for (const model of IMAGE_GENERATION_MODELS) {
+      try {
+        console.log(
+          "START_IMAGE_GENERATION_MODEL",
+          model
+        );
 
-      const response =
-        await ai.models.generateImages({
-          model:
-            GEMINI_IMAGE_MODEL,
-          prompt,
-          config: {
-            numberOfImages: 1,
-            aspectRatio: "16:9",
-          },
+        const response =
+          await ai.models.generateImages({
+            model,
+            prompt,
+            config: {
+              numberOfImages: 1,
+              aspectRatio: "16:9",
+            },
+          });
+
+        console.log(
+          "IMAGE_MODEL_RESPONSE_SUCCESS",
+          model
+        );
+
+        const image =
+          getBase64ImageFromGeneratedImages(
+            response
+          );
+
+        if (!image) {
+          throw new Error(
+            "No image bytes returned"
+          );
+        }
+
+        return await writeGeneratedImage({
+          originalQuestion,
+          previousAnswer,
+          bytes: Buffer.from(
+            image,
+            "base64"
+          ),
         });
-
-      console.log(
-        "IMAGE_MODEL_RESPONSE_SUCCESS"
-      );
-
-      const image =
-        response?.generatedImages?.[0]
-          ?.image?.imageBytes;
-
-      if (!image) {
-        throw new Error(
-          "No image bytes returned"
+      } catch (err) {
+        console.error(
+          "IMAGE_MODEL_ERROR:",
+          model,
+          err?.message || err
         );
       }
-
-      return await writeGeneratedImage({
-        originalQuestion,
-        previousAnswer,
-        bytes: Buffer.from(
-          image,
-          "base64"
-        ),
-      });
-    } catch (err) {
-      console.error(
-        "IMAGE_MODEL_ERROR:",
-        err?.message || err
-      );
-
-      return {
-        failed: true,
-      };
     }
+
+    return {
+      failed: true,
+    };
   };
 
 const generateTextAnswer =
@@ -394,12 +597,33 @@ const generateTextAnswer =
     previousAnswer,
     followupType,
   }) => {
+    const followupInstructionByType = {
+      example: `Continue the same topic naturally and explain it with 1 or 2 simple real-life examples.`,
+      step_by_step: `Continue the same topic naturally and explain it slowly in numbered points.`,
+      short_summary: `Continue the same topic naturally and give a very short revision note in 2 or 3 lines.`,
+    };
+
+    const followupInstruction =
+      followupInstructionByType[
+        followupType
+      ] ||
+      "Continue the same topic naturally and explain it clearly in a short, student-friendly way.";
+
     try {
       const result =
         await ai.models.generateContent({
           model: "gemini-2.5-flash",
           contents: `
 You are a professional educational AI assistant.
+
+Behavior rules:
+- First answer the student's question normally and clearly.
+- Do not disturb the normal chat flow.
+- Do not automatically continue into long explanations.
+- Keep the response short, clean, educational, and student friendly.
+- Continue the SAME topic naturally using the previous context.
+- Do not ask the student to repeat the question.
+- Never say "I don't understand", "No context", "Unable to generate", or "Please provide more details".
 
 Question:
 ${originalQuestion}
@@ -410,13 +634,16 @@ ${previousAnswer}
 Followup Type:
 ${followupType}
 
-Generate a clean educational response for students.
+Instruction:
+${followupInstruction}
+
+Generate only the answer text for students. Do not add suggestion labels or extra sections.
 `,
         });
 
       return (
         result?.text ||
-        "Unable to generate answer."
+        "Let's continue with a short, clear explanation."
       );
     } catch (err) {
       console.error(
@@ -424,7 +651,7 @@ Generate a clean educational response for students.
         err?.message || err
       );
 
-      return "Unable to generate answer.";
+      return "Let's continue with a short, clear explanation.";
     }
   };
 
@@ -442,37 +669,14 @@ export const buildStudentFollowupSuggestions =
       return [];
     }
 
-    return [
-      {
-        label: "Explain with Example",
-        followupType: "example",
+    return FOLLOWUP_SUGGESTION_CONFIG.map(
+      (item) => ({
+        ...item,
         topic: getTopicText(
           safeQuestion
         ),
-      },
-      {
-        label: "Explain Step by Step",
-        followupType:
-          "step_by_step",
-        topic: getTopicText(
-          safeQuestion
-        ),
-      },
-      {
-        label: "Explain Details",
-        followupType: "details",
-        topic: getTopicText(
-          safeQuestion
-        ),
-      },
-      {
-        label: "Explain Picture",
-        followupType: "picture",
-        topic: getTopicText(
-          safeQuestion
-        ),
-      },
-    ];
+      })
+    );
   };
 
 export async function generateAiFollowup({
@@ -513,10 +717,22 @@ export async function generateAiFollowup({
     if (imageResult.failed) {
       return {
         answer:
-          "Unable to generate educational image right now. Please try again.",
+          buildPictureFallbackAnswer({
+            originalQuestion:
+              safeQuestion,
+            previousAnswer:
+              safeAnswer,
+          }),
         followupType:
           safeType,
         source: "ai-followup",
+        followupSuggestions:
+          buildStudentFollowupSuggestions({
+            originalQuestion:
+              safeQuestion,
+            previousAnswer:
+              safeAnswer,
+          }),
       };
     }
 
@@ -544,6 +760,13 @@ export async function generateAiFollowup({
         imageResult.imageUrl,
       imageDataUrl:
         imageResult.imageDataUrl,
+      followupSuggestions:
+        buildStudentFollowupSuggestions({
+          originalQuestion:
+            safeQuestion,
+          previousAnswer:
+            safeAnswer,
+        }),
     };
   }
 
@@ -562,5 +785,12 @@ export async function generateAiFollowup({
     followupType:
       safeType,
     source: "ai-followup",
+    followupSuggestions:
+      buildStudentFollowupSuggestions({
+        originalQuestion:
+          safeQuestion,
+        previousAnswer:
+          safeAnswer,
+      }),
   };
 }

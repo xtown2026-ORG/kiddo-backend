@@ -3,6 +3,7 @@ import {
   createNotificationService,
   listNotificationsForUserService,
 } from "./notification.service.js";
+import { listApprovedParentLinks } from "../parents/parent.family.service.js";
 
 /* ADMIN / TEACHER: CREATE */
 export const createNotification = asyncHandler(async (req, res) => {
@@ -30,18 +31,28 @@ export const listNotifications = asyncHandler(async (req, res) => {
   }
 
   if (req.user.role === "parent") {
-    const Parent = (await import("../parents/parent.model.js")).default;
-    const Student = (await import("../students/student.model.js")).default;
-
-    const links = await Parent.findAll({
-      where: { user_id: req.user.id, approval_status: "approved" },
-      include: [{ model: Student, attributes: ["class_id", "section_id"] }],
+    const selectedStudentId = req.query.student_id
+      ? Number(req.query.student_id)
+      : null;
+    const links = await listApprovedParentLinks({
+      parent_user_id: req.user.id,
+      school_id: req.user.school_id,
     });
 
     classIds = links
+      .filter((link) => {
+        if (!selectedStudentId) return true;
+        const student = link.student ?? link.Student;
+        return Number(student?.id) === selectedStudentId;
+      })
       .map((l) => (l.student ?? l.Student)?.class_id)
       .filter((v) => v !== undefined && v !== null);
     sectionIds = links
+      .filter((link) => {
+        if (!selectedStudentId) return true;
+        const student = link.student ?? link.Student;
+        return Number(student?.id) === selectedStudentId;
+      })
       .map((l) => (l.student ?? l.Student)?.section_id)
       .filter((v) => v !== undefined && v !== null);
   }

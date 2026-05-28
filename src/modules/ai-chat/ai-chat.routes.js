@@ -1,6 +1,7 @@
 import express from "express";
 import { protect } from "../../shared/middlewares/auth.js";
 import {
+  createFollowupController,
   deleteConversationController,
   getConversationController,
   getConversationMessagesController,
@@ -14,6 +15,7 @@ const router = express.Router();
 
 router.use(protect);
 
+router.post("/followup", createFollowupController);
 router.get("/conversations", listConversationsController);
 router.get("/conversations/:conversationId", getConversationController);
 router.get("/conversations/:conversationId/messages", getConversationMessagesController);

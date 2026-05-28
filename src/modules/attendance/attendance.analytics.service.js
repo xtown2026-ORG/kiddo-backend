@@ -3,6 +3,7 @@ import Attendance from "./attendance.model.js";
 import Parent from "../parents/parent.model.js";
 import AppError from "../../shared/appError.js";
 import TeacherClassSession from "../teacher-class-sessions/teacher-class-session.model.js";
+import { listApprovedParentLinks } from "../parents/parent.family.service.js";
 
 /* =========================
    TEACHER: ANALYTICS
@@ -70,19 +71,22 @@ export const getTeacherAttendanceAnalyticsService = async ({
 ========================= */
 export const getParentAttendanceAnalyticsService = async ({
   parent_user_id,
+  school_id,
   query,
 }) => {
-  const { from_date, to_date } = query || {};
+  const { from_date, to_date, student_id } = query || {};
 
-  const links = await Parent.findAll({
-    where: {
-      user_id: parent_user_id,
-      approval_status: "approved",
-    },
-    attributes: ["student_id"],
+  const links = await listApprovedParentLinks({
+    parent_user_id,
+    school_id,
   });
 
-  const studentIds = links.map((l) => l.student_id);
+  let studentIds = links
+    .map((l) => Number(l.student_id))
+    .filter(Number.isFinite);
+  if (student_id) {
+    studentIds = studentIds.filter((id) => Number(id) === Number(student_id));
+  }
   if (!studentIds.length) return [];
 
   const where = {

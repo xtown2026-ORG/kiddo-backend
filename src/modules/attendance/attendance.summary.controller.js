@@ -59,6 +59,7 @@ export const getTeacherAttendanceSummary = asyncHandler(async (req, res) => {
 export const getParentAttendanceSummary = asyncHandler(async (req, res) => {
   const result = await getParentAttendanceSummaryService({
     parent_user_id: req.user.id,
+    school_id: req.user.school_id,
     query: req.query,
   });
 

@@ -1,5 +1,6 @@
 import asyncHandler from "../../shared/asyncHandler.js";
 import {
+  generateAiChatFollowup,
   getAiChatConversation,
   getAiChatMessages,
   listAiChatConversations,
@@ -70,4 +71,14 @@ export const restoreConversationController = asyncHandler(async (req, res) => {
     conversationId: req.params.conversationId,
   });
   res.json(restored);
+});
+
+export const createFollowupController = asyncHandler(async (req, res) => {
+  const result = await generateAiChatFollowup({
+    originalQuestion: req.body?.originalQuestion,
+    previousAnswer: req.body?.previousAnswer,
+    followupType: req.body?.followupType,
+  });
+
+  res.json(result);
 });

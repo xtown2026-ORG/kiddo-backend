@@ -8,6 +8,7 @@ import Class from "../classes/classes.model.js";
 import Section from "../sections/section.model.js";
 import School from "../schools/school.model.js";
 import { createNotificationService } from "../notifications/notification.service.js";
+import { listApprovedParentLinks } from "../parents/parent.family.service.js";
 
 import { QueryTypes } from "sequelize";
 
@@ -675,28 +676,25 @@ export const getParentPaymentLogsService = async ({ schoolId, parentUserId, stud
     throw new AppError("School context is required", 400);
   }
 
-  const parentLinks = await Parent.findAll({
-    where: { user_id: parentUserId, approval_status: "approved" },
-    include: [
-      {
-        model: Student,
-        attributes: ["id", "class_id", "section_id"],
-        include: [
-          { model: User, attributes: ["name"] },
-          { model: Class, attributes: ["class_name"] },
-          { model: Section, attributes: ["name"] },
-        ],
-      },
-    ],
-    order: [["id", "ASC"]],
+  const parentLinks = await listApprovedParentLinks({
+    parent_user_id: parentUserId,
+    school_id: schoolId,
+    includeStudentDetails: true,
   });
 
+  const seenStudentIds = new Set();
   const students = parentLinks
     .map((link) => link.student ?? link.Student)
     .filter((student) => {
       if (!student) return false;
       if (!studentId) return true;
       return Number(student.id) === Number(studentId);
+    })
+    .filter((student) => {
+      const id = Number(student.id);
+      if (!Number.isFinite(id) || seenStudentIds.has(id)) return false;
+      seenStudentIds.add(id);
+      return true;
     });
 
   const studentIds = [...new Set(students.map((s) => Number(s.id)).filter(Number.isFinite))];

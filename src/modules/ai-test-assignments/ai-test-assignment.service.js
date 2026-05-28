@@ -12,6 +12,7 @@ import Subject from "../subjects/subject.model.js";
 import Parent from "../parents/parent.model.js";
 import AITestAssignment from "./ai-test-assignment.model.js";
 import AITestSubmission from "./ai-test-submission.model.js";
+import { listApprovedParentLinks } from "../parents/parent.family.service.js";
 
 const GEMINI_MODEL = (process.env.GEMINI_MODEL || "gemini-2.5-flash-lite").replace(/^models\//, "");
 const ai = process.env.GEMINI_API_KEY ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }) : null;
@@ -900,21 +901,12 @@ export async function getStudentLockStatus({ user }) {
 }
 
 export async function listParentAssignmentResults({ user, student_id = null }) {
-  const links = await Parent.findAll({
-    where: {
-      user_id: user.id,
-      approval_status: "approved",
-    },
-    include: [
-      {
-        model: Student,
-        attributes: ["id", "roll_no", "admission_no", "class_id", "section_id"],
-        include: [{ model: User, attributes: ["id", "name", "username"] }],
-      },
-    ],
+  const links = await listApprovedParentLinks({
+    parent_user_id: user.id,
+    school_id: user.school_id,
   });
 
-  let studentIds = links.map((item) => item.student_id).filter(Boolean);
+  let studentIds = [...new Set(links.map((item) => Number(item.student_id)).filter(Number.isFinite))];
   if (student_id) {
     studentIds = studentIds.filter((id) => Number(id) === Number(student_id));
   }

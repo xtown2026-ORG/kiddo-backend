@@ -1,7 +1,29 @@
+import { config as loadEnv } from "dotenv";
+import crypto from "crypto";
+import { mkdir, writeFile } from "fs/promises";
+import OpenAI from "openai";
+import path from "path";
+import { fileURLToPath } from "url";
 import { Op } from "sequelize";
 import AiChatConversation from "./ai-chat-conversation.model.js";
 import AiChatMessage from "./ai-chat-message.model.js";
 import AppError from "../../shared/appError.js";
+import {
+  buildStudentFollowupSuggestions,
+  generateAiFollowup,
+} from "../ai-followup/aiFollowup.service.js";
+
+loadEnv();
+
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT = path.resolve(MODULE_DIR, "../../../");
+const FOLLOWUP_UPLOAD_DIR = path.join(PROJECT_ROOT, "uploads", "ai-followups");
+const FOLLOWUP_UPLOAD_URL = "/api/ai-followup/uploads/ai-followups";
+const OPENAI_TEXT_MODEL = process.env.OPENAI_FOLLOWUP_MODEL || "gpt-4o-mini";
+const OPENAI_IMAGE_MODEL = process.env.OPENAI_FOLLOWUP_IMAGE_MODEL || "gpt-image-1";
+const openai = process.env.OPENAI_API_KEY
+  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  : null;
 
 function normalizeText(value, fallback = "") {
   return String(value ?? fallback).trim();
@@ -10,6 +32,135 @@ function normalizeText(value, fallback = "") {
 function normalizeTimestamp(value) {
   const date = value ? new Date(value) : new Date();
   return Number.isNaN(date.getTime()) ? new Date() : date;
+}
+
+function getTopicText(question) {
+  return normalizeText(question)
+    .replace(/^(what is|what are|explain|describe)\s+/i, "")
+    .replace(/[?.!]+$/g, "");
+}
+
+function buildPictureFallbackAnswer({
+  originalQuestion,
+  previousAnswer,
+}) {
+  return `
+Visual Explanation:
+Picture a clean textbook diagram of ${getTopicText(originalQuestion)} with clear labels and arrows.
+
+- Start with the main title on top.
+- Put the key concept in the center.
+- Add labels for each important part.
+- Show the process in the correct order.
+- Highlight the main points students should remember.
+
+Text Explanation:
+${previousAnswer}
+`.trim();
+}
+
+async function writeGeneratedImage({
+  originalQuestion,
+  previousAnswer,
+  base64Image,
+}) {
+  await mkdir(FOLLOWUP_UPLOAD_DIR, { recursive: true });
+
+  const version = Date.now();
+  const hash = crypto
+    .createHash("sha1")
+    .update(`${originalQuestion}\n${previousAnswer}\n${version}`)
+    .digest("hex")
+    .slice(0, 12);
+
+  const filename = `picture-followup-${hash}.png`;
+  const filePath = path.join(FOLLOWUP_UPLOAD_DIR, filename);
+  const bytes = Buffer.from(base64Image, "base64");
+
+  await writeFile(filePath, bytes);
+
+  return {
+    imageUrl: `${FOLLOWUP_UPLOAD_URL}/${filename}?v=${version}`,
+    imageDataUrl: `data:image/png;base64,${base64Image}`,
+  };
+}
+
+async function generateOpenAiTextFollowup({
+  originalQuestion,
+  previousAnswer,
+  followupType,
+}) {
+  if (!openai) {
+    throw new AppError("OPENAI_API_KEY is missing", 500);
+  }
+
+  const instructionsByType = {
+    example: "Explain the same topic using 1 or 2 simple real-life examples.",
+    step_by_step: "Explain the same topic step by step in short numbered points.",
+    short_summary: "Give a very short summary in 2 or 3 simple lines.",
+    picture: "Describe the topic like a simple visual textbook diagram for a student.",
+  };
+
+  const response = await openai.chat.completions.create({
+    model: OPENAI_TEXT_MODEL,
+    messages: [
+      {
+        role: "system",
+        content:
+          "You are a friendly educational AI for school students. Keep answers clear, short, accurate, and easy to understand.",
+      },
+      {
+        role: "user",
+        content: [
+          `Original question: ${originalQuestion}`,
+          `Previous answer: ${previousAnswer}`,
+          `Follow-up type: ${followupType}`,
+          `Instruction: ${
+            instructionsByType[followupType] ||
+            "Continue the same topic naturally in a student-friendly way."
+          }`,
+          "Return only the answer text. Do not add labels or markdown fences.",
+        ].join("\n\n"),
+      },
+    ],
+  });
+
+  return normalizeText(
+    response?.choices?.[0]?.message?.content,
+    "Let's continue with a short, clear explanation."
+  );
+}
+
+async function generateOpenAiPictureFollowup({
+  originalQuestion,
+  previousAnswer,
+}) {
+  if (!openai) {
+    throw new AppError("OPENAI_API_KEY is missing", 500);
+  }
+
+  const topic = getTopicText(originalQuestion);
+
+  const imageResponse = await openai.images.generate({
+    model: OPENAI_IMAGE_MODEL,
+    prompt: [
+      `Create a clean educational textbook-style diagram about ${topic}.`,
+      "Use a white background, clear labels, neat arrows, and student-friendly scientific illustration.",
+      "Make it look like a school study poster, readable and uncluttered.",
+    ].join(" "),
+    size: "1536x1024",
+  });
+
+  const base64Image = imageResponse?.data?.[0]?.b64_json;
+  if (!base64Image) {
+    throw new Error("OpenAI image generation returned no image");
+  }
+
+  return writeGeneratedImage({
+    originalQuestion,
+    previousAnswer,
+    base64Image,
+  });
 }
 
 function getConversationTitle(messages = [], preferredTitle = "") {
@@ -318,4 +469,102 @@ export async function restoreAiChatConversation({ user, conversationId }) {
   });
   await conversation.update({ deleted_at: null, last_synced_at: new Date() });
   return serializeConversation(conversation);
+}
+
+export async function generateAiChatFollowup({
+  originalQuestion,
+  previousAnswer,
+  followupType,
+}) {
+  const safeQuestion = normalizeText(originalQuestion);
+  const safeAnswer = normalizeText(previousAnswer);
+  const safeType = normalizeText(followupType).toLowerCase();
+
+  if (!safeQuestion || !safeAnswer || !safeType) {
+    throw new AppError("Question, previous answer, and followup type are required", 400);
+  }
+
+  if (safeType === "picture") {
+    try {
+      const imageResult = await generateOpenAiPictureFollowup({
+        originalQuestion: safeQuestion,
+        previousAnswer: safeAnswer,
+      });
+
+      return {
+        answer: `This picture explains ${getTopicText(safeQuestion)} in a simple visual way.`,
+        followupType: safeType,
+        source: "ai-chat-followup",
+        imageUrl: imageResult.imageUrl,
+        imageDataUrl: imageResult.imageDataUrl,
+        followupSuggestions: buildStudentFollowupSuggestions({
+          originalQuestion: safeQuestion,
+          previousAnswer: safeAnswer,
+        }),
+      };
+    } catch (error) {
+      try {
+        const geminiResult = await generateAiFollowup({
+          originalQuestion: safeQuestion,
+          previousAnswer: safeAnswer,
+          followupType: safeType,
+        });
+
+        if (geminiResult?.imageUrl || geminiResult?.imageDataUrl) {
+          return {
+            answer:
+              geminiResult.answer ||
+              `This picture explains ${getTopicText(safeQuestion)} in a simple visual way.`,
+            followupType: safeType,
+            source: "ai-chat-followup",
+            imageUrl: geminiResult.imageUrl || null,
+            imageDataUrl: geminiResult.imageDataUrl || null,
+            followupSuggestions: buildStudentFollowupSuggestions({
+              originalQuestion: safeQuestion,
+              previousAnswer: safeAnswer,
+            }),
+          };
+        }
+      } catch {
+        // Fall through to text fallback below.
+      }
+
+      const fallbackAnswer = await generateOpenAiTextFollowup({
+        originalQuestion: safeQuestion,
+        previousAnswer: safeAnswer,
+        followupType: safeType,
+      }).catch(() =>
+        buildPictureFallbackAnswer({
+          originalQuestion: safeQuestion,
+          previousAnswer: safeAnswer,
+        })
+      );
+
+      return {
+        answer: fallbackAnswer,
+        followupType: safeType,
+        source: "ai-chat-followup",
+        followupSuggestions: buildStudentFollowupSuggestions({
+          originalQuestion: safeQuestion,
+          previousAnswer: safeAnswer,
+        }),
+      };
+    }
+  }
+
+  const answer = await generateOpenAiTextFollowup({
+    originalQuestion: safeQuestion,
+    previousAnswer: safeAnswer,
+    followupType: safeType,
+  });
+
+  return {
+    answer,
+    followupType: safeType,
+    source: "ai-chat-followup",
+    followupSuggestions: buildStudentFollowupSuggestions({
+      originalQuestion: safeQuestion,
+      previousAnswer: safeAnswer,
+    }),
+  };
 }

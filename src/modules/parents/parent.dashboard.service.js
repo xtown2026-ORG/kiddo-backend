@@ -1,18 +1,12 @@
-import Parent from "./parent.model.js";
-import Student from "../students/student.model.js";
-import User from "../users/user.model.js";
-import Class from "../classes/classes.model.js";
-import Section from "../sections/section.model.js";
 import { getPagination } from "../../shared/utils/pagination.js";
-
 import Timetable from "../timetables/timetable.model.js";
 import Homework from "../homework/homework.model.js";
 import HomeworkSubmission from "../homework/homework-submission.model.js";
 import ReportCard from "../report-cards/report-card.model.js";
 import Attendance from "../attendance/attendance.model.js";
 import Exam from "../report-cards/exam.model.js";
-
 import { Op } from "sequelize";
+import { listApprovedParentLinks } from "./parent.family.service.js";
 
 /* =========================================================
    1️⃣ PARENT → CHILDREN LIST (PROFILE / MANAGEMENT)
@@ -24,36 +18,27 @@ export const getParentChildrenService = async ({
   query,
 }) => {
   const { limit, offset } = getPagination(query);
-
-  return Parent.findAndCountAll({
-    where: {
-      user_id: parent_user_id,
-      approval_status: "approved",
-    },
-    include: [
-      {
-        model: Student,
-        where: { approval_status: "approved", school_id },
-        include: [
-          {
-            model: User,
-            attributes: ["id", "name", "username", "is_active"],
-          },
-          {
-            model: Class,
-            attributes: ["id", "class_name"],
-          },
-          {
-            model: Section,
-            attributes: ["id", "name"],
-          },
-        ],
-      },
-    ],
-    limit,
-    offset,
-    order: [["created_at", "ASC"], ["id", "ASC"]],
+  const links = await listApprovedParentLinks({
+    parent_user_id,
+    school_id,
+    includeStudentDetails: true,
   });
+
+  const uniqueLinks = [];
+  const seenStudentIds = new Set();
+
+  for (const link of links) {
+    const student = link.student ?? link.Student;
+    const studentId = Number(student?.id);
+    if (!Number.isFinite(studentId) || seenStudentIds.has(studentId)) continue;
+    seenStudentIds.add(studentId);
+    uniqueLinks.push(link);
+  }
+
+  return {
+    count: uniqueLinks.length,
+    rows: uniqueLinks.slice(offset, offset + limit),
+  };
 };
 
 /* =========================================================
@@ -72,20 +57,21 @@ export const getParentDailyDashboardService = async ({
   parent_user_id,
   student_id = null,
 }) => {
-  // get children
-  const students = await Student.findAll({
-    where: { school_id },
-    include: [
-      {
-        model: Parent,
-        where: { user_id: parent_user_id, approval_status: "approved" },
-      },
-      {
-        model: User,
-        attributes: ["id", "name"],
-      },
-    ],
+  const links = await listApprovedParentLinks({
+    parent_user_id,
+    school_id,
   });
+
+  const students = [];
+  const seenStudentIds = new Set();
+
+  for (const link of links) {
+    const student = link.student ?? link.Student;
+    const studentId = Number(student?.id);
+    if (!Number.isFinite(studentId) || seenStudentIds.has(studentId)) continue;
+    seenStudentIds.add(studentId);
+    students.push(student);
+  }
 
   const normalizedStudentId = student_id ? Number(student_id) : null;
   const filteredStudents = normalizedStudentId

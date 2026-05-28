@@ -9,6 +9,7 @@ import AppError from "../../shared/appError.js";
 import { triggerHomeworkNotification } from "../notifications/notification-trigger.service.js";
 import { getPagination } from "../../shared/utils/pagination.js";
 import { Op } from "sequelize";
+import { listApprovedParentLinks } from "../parents/parent.family.service.js";
 
 export const createHomeworkService = async ({
   user,
@@ -96,16 +97,19 @@ export const listHomeworkService = async ({
     where.class_id = user.class_id;
     where.section_id = user.section_id;
   } else if (user?.role === "parent") {
-    const parentWhere = { user_id: user.id };
-    if (student_id) {
-      parentWhere.student_id = Number(student_id);
-    }
-
-    const parent = await Parent.findOne({
-      where: parentWhere,
-      include: [{ model: Student, attributes: ["class_id", "section_id"] }],
+    const links = await listApprovedParentLinks({
+      parent_user_id: user.id,
+      school_id,
     });
-    const student = parent?.student || parent?.Student;
+
+    const student = links
+      .map((link) => link.student ?? link.Student)
+      .find((item) => {
+        if (!item) return false;
+        if (!student_id) return true;
+        return Number(item.id) === Number(student_id);
+      });
+
     if (!student) {
       return { count: 0, rows: [] };
     }
