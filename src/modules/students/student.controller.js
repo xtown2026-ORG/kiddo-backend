@@ -105,37 +105,10 @@ export const completeStudentProfile = asyncHandler(async (req, res) => {
     }
   }
 
-  let sharedLinkedParentPhone = false;
-
-  if (phone) {
-    const existingPhone = await User.findOne({ where: { phone } });
-    if (existingPhone && existingPhone.id !== req.user.id) {
-      let allowedLinkedParent = false;
-
-      if (existingPhone.role === "parent") {
-        const linkedParents = await Parent.findAll({
-          where: {
-            user_id: existingPhone.id,
-            student_id: student.id,
-          },
-          attributes: ["id"],
-        });
-
-        allowedLinkedParent = linkedParents.length > 0;
-      }
-
-      if (!allowedLinkedParent) {
-        throw new AppError("Phone already in use", 400);
-      }
-
-      sharedLinkedParentPhone = allowedLinkedParent;
-    }
-  }
-
   const userUpdates = {};
   if (name !== undefined) userUpdates.name = name;
   if (phone !== undefined) {
-    userUpdates.phone = sharedLinkedParentPhone ? null : phone;
+    userUpdates.phone = phone;
   }
   if (req.body.email !== undefined) userUpdates.email = req.body.email;
   if (avatar_url !== undefined) userUpdates.avatar_url = avatar_url || null;
