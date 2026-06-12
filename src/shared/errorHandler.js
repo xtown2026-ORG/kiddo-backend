@@ -6,7 +6,7 @@ export default function errorHandler(err, req, res, next) {
   const errMessage = String(err?.message || "").toLowerCase();
 
   if (err?.name === "SequelizeUniqueConstraintError") {
-    statusCode = 400;
+    statusCode = 409;
     const field = err?.errors?.[0]?.path;
     message = field ? `${field} already in use` : "Unique constraint violation";
   }

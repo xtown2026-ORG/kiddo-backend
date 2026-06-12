@@ -19,6 +19,9 @@ import { initNotificationSocket } from "./src/socket/notification.socket.js";
 
 
 const app = express();
+// Needed for correct client IP detection behind a reverse proxy (and for express-rate-limit).
+// Safe for local dev; if no proxy headers are present Express still uses the socket address.
+app.set("trust proxy", 1);
 const PORT = process.env.PORT || 3003;
 const ALLOWED_ORIGINS = [
   "http://localhost:5173",
@@ -130,6 +133,7 @@ import aiTestAssignmentRoutes from "./src/modules/ai-test-assignments/ai-test-as
 import aiAnalyticsRoutes from "./src/modules/ai-analytics/ai-analytics.routes.js";
 import subscriptionRoutes from "./src/modules/subscriptions/subscription.routes.js";
 import tokenRoutes from "./src/modules/tokens/token.routes.js";
+import utilsRoutes from "./src/modules/utils/utils.routes.js";
 
 // teacher planning & tracking
 import teacherAssignmentRoutes from "./src/modules/teacher-assignments/teacher-assignment.routes.js";
@@ -213,6 +217,9 @@ app.use("/api", subscriptionRoutes);
 // tokens (super admin)
 app.use("/api", tokenRoutes);
 
+// utilities (public)
+app.use("/api/utils", utilsRoutes);
+
 // AI
 
 app.use("/api/ai-chat", aiChatRoutes);
@@ -267,6 +274,21 @@ app.use(errorHandler);
 try {
   await db.authenticate();
   console.log("DB connected");
+
+  // Hotfix: ensure `teacher_assignments.academic_year` exists before Sequelize tries to create indexes on it.
+  // This avoids startup crashes when migrations haven't been run yet.
+  try {
+    await db.query(
+      "ALTER TABLE teacher_assignments ADD COLUMN IF NOT EXISTS academic_year VARCHAR(20) NOT NULL DEFAULT '2025-2026';"
+    );
+    // If a previous startup created a truncated index name (Postgres 63-char limit),
+    // drop it so Sequelize can recreate the intended unique index cleanly.
+    await db.query(
+      'DROP INDEX IF EXISTS "teacher_assignments_school_id_teacher_id_class_id_section_id_su";'
+    );
+  } catch (e) {
+    // Ignore if the table doesn't exist yet (fresh DB); `sync()` will create it.
+  }
 
   await db.sync({ force : false });
 

@@ -2,6 +2,7 @@ import TeacherAssignment from "./teacher-assignment.model.js";
 import AppError from "../../shared/appError.js";
 import { getPagination } from "../../shared/utils/pagination.js";
 import { Op } from "sequelize";
+import db from "../../config/db.js";
 import Teacher from "../teachers/teacher.model.js";
 import Class from "../classes/classes.model.js";
 import Section from "../sections/section.model.js";
@@ -17,78 +18,105 @@ export async function assignTeacher({
   sectionId,
   subjectId,
   isClassTeacher = false,
+  academicYear = "2025-2026",
 }) {
-  const [teacher, cls, section, subject] = await Promise.all([
-    Teacher.findOne({
+  return db.transaction(async (transaction) => {
+    const [teacher, cls, section, subject] = await Promise.all([
+      Teacher.findOne({
+        where: {
+          school_id: schoolId,
+          id: teacherId,
+        },
+        transaction,
+        lock: transaction.LOCK?.SHARE,
+      }),
+      Class.findOne({ where: { id: classId, school_id: schoolId }, transaction }),
+      Section.findOne({
+        where: { id: sectionId, class_id: classId, school_id: schoolId, is_active: true },
+        transaction,
+      }),
+      Subject.findOne({ where: { id: subjectId, school_id: schoolId }, transaction }),
+    ]);
+
+    if (!teacher) {
+      throw new AppError("TEACHER_NOT_FOUND", 404);
+    }
+    if (!cls) {
+      throw new AppError("CLASS_NOT_FOUND", 404);
+    }
+    if (!section) {
+      throw new AppError("SECTION_NOT_FOUND", 404);
+    }
+    if (!subject) {
+      throw new AppError("SUBJECT_NOT_FOUND", 404);
+    }
+
+    // Check for existing assignment (same teacher + section + subject in same school)
+    // Note: we still do this check for a fast, friendly 409. DB uniqueness also protects against races.
+    const exists = await TeacherAssignment.findOne({
       where: {
         school_id: schoolId,
-        [Op.or]: [{ id: teacherId }, { user_id: teacherId }],
-      },
-    }),
-    Class.findOne({ where: { id: classId, school_id: schoolId } }),
-    Section.findOne({
-      where: { id: sectionId, class_id: classId, school_id: schoolId, is_active: true },
-    }),
-    Subject.findOne({ where: { id: subjectId, school_id: schoolId } }),
-  ]);
-
-  if (!teacher) {
-    throw new AppError("TEACHER_NOT_FOUND", 404);
-  }
-  if (!cls) {
-    throw new AppError("CLASS_NOT_FOUND", 404);
-  }
-  if (!section) {
-    throw new AppError("SECTION_NOT_FOUND", 404);
-  }
-  if (!subject) {
-    throw new AppError("SUBJECT_NOT_FOUND", 404);
-  }
-
-  // Check for existing assignment (same teacher + section + subject in same school)
-  const exists = await TeacherAssignment.findOne({
-    where: {
-      school_id: schoolId,
-      teacher_id: teacher.id,
-      section_id: sectionId,
-      subject_id: subjectId,
-      is_active: true,
-    },
-  });
-
-  if (exists) {
-    throw new AppError(
-      "Teacher already assigned to this subject in this section",
-      409
-    );
-  }
-
-  // If trying to set as class teacher, check if section already has a class teacher
-  if (isClassTeacher) {
-    const existingClassTeacher = await TeacherAssignment.findOne({
-      where: {
-        school_id: schoolId,
+        teacher_id: teacher.id,
+        class_id: classId,
         section_id: sectionId,
-        is_class_teacher: true,
+        subject_id: subjectId,
+        academic_year: academicYear,
         is_active: true,
       },
+      transaction,
+      lock: transaction.LOCK?.UPDATE,
     });
 
-    if (existingClassTeacher) {
+    if (exists) {
       throw new AppError(
-        "This section already has a class teacher assigned",
+        "Teacher already assigned to this subject in this section",
         409
       );
     }
-  }
 
-  return TeacherAssignment.create({
-    school_id: schoolId,
-    teacher_id: teacher.id,
-    class_id: classId,
-    section_id: sectionId,
-    subject_id: subjectId,
-    is_class_teacher: isClassTeacher,
+    // If trying to set as class teacher, check if section already has a class teacher
+    if (isClassTeacher) {
+      const existingClassTeacher = await TeacherAssignment.findOne({
+        where: {
+          school_id: schoolId,
+          section_id: sectionId,
+          is_class_teacher: true,
+          is_active: true,
+        },
+        transaction,
+        lock: transaction.LOCK?.UPDATE,
+      });
+
+      if (existingClassTeacher) {
+        throw new AppError(
+          "This section already has a class teacher assigned",
+          409
+        );
+      }
+    }
+
+    try {
+      return await TeacherAssignment.create(
+        {
+          school_id: schoolId,
+          teacher_id: teacher.id,
+          class_id: classId,
+          section_id: sectionId,
+          subject_id: subjectId,
+          academic_year: academicYear,
+          is_class_teacher: isClassTeacher,
+        },
+        { transaction }
+      );
+    } catch (err) {
+      if (err?.name === "SequelizeUniqueConstraintError") {
+        throw new AppError(
+          "Teacher already assigned to this subject in this section",
+          409
+        );
+      }
+      throw err;
+    }
   });
 }
 
@@ -103,6 +131,16 @@ export async function listAssignments({ schoolId, query }) {
     },
     limit,
     offset,
+    include: [
+      { model: Class, attributes: ["id", "class_name"] },
+      { model: Section, attributes: ["id", "name"] },
+      { model: Subject, attributes: ["id", "name"] },
+      {
+        model: Teacher,
+        attributes: ["id", "user_id"],
+        include: [{ model: User, attributes: ["id", "name", "username"] }],
+      },
+    ],
     order: [["created_at", "DESC"]],
   });
 }
@@ -169,6 +207,7 @@ export async function updateAssignment({ schoolId, assignmentId, updates }) {
   const nextClassId = updates.class_id ?? assignment.class_id;
   const nextSectionId = updates.section_id ?? assignment.section_id;
   const nextSubjectId = updates.subject_id ?? assignment.subject_id;
+  const nextAcademicYear = updates.academic_year ?? assignment.academic_year;
 
   if (
     updates.teacher_id !== undefined ||
@@ -180,7 +219,7 @@ export async function updateAssignment({ schoolId, assignmentId, updates }) {
       Teacher.findOne({
         where: {
           school_id: schoolId,
-          [Op.or]: [{ id: nextTeacherId }, { user_id: nextTeacherId }],
+          id: nextTeacherId,
         },
       }),
       Class.findOne({ where: { id: nextClassId, school_id: schoolId } }),
@@ -212,8 +251,10 @@ export async function updateAssignment({ schoolId, assignmentId, updates }) {
       where: {
         school_id: schoolId,
         teacher_id: teacher.id,
+        class_id: nextClassId,
         section_id: nextSectionId,
         subject_id: nextSubjectId,
+        academic_year: nextAcademicYear,
         is_active: true,
         id: { [Op.ne]: assignmentId },
       },

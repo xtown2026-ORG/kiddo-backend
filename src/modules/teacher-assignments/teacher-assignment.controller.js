@@ -13,6 +13,7 @@ export const assignTeacher = asyncHandler(async (req, res) => {
     sectionId: req.body.section_id,
     subjectId: req.body.subject_id,
     isClassTeacher: req.body.is_class_teacher,
+    academicYear: req.body.academic_year,
   });
 
   res.status(201).json({

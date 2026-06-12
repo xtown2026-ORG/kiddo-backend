@@ -60,6 +60,12 @@ const TeacherAssignment = db.define(
       onDelete: "CASCADE",
     },
 
+    academic_year: {
+      type: DataTypes.STRING(20),
+      allowNull: false,
+      defaultValue: "2025-2026",
+    },
+
     is_active: {
       type: DataTypes.BOOLEAN,
       defaultValue: true,
@@ -79,7 +85,7 @@ const TeacherAssignment = db.define(
       { fields: ["class_id"] },
       {
         unique: true,
-        fields: ["teacher_id", "section_id", "subject_id"],
+        fields: ["school_id", "teacher_id", "class_id", "section_id", "subject_id", "academic_year"],
       },
     ],
   }
