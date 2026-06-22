@@ -1,20 +1,16 @@
 import jwt from "jsonwebtoken";
-import { Op } from "sequelize";
 import asyncHandler from "../../shared/asyncHandler.js";
 import AppError from "../../shared/appError.js";
 import User from "../users/user.model.js";
 import School from "../schools/school.model.js";
+import Parent from "../parents/parent.model.js";
 
 export const login = asyncHandler(async (req, res) => {
-  const { username, email, password } = req.body; // already validated by Zod
-  const identifiers = [];
-  if (username) identifiers.push({ username });
-  if (email) identifiers.push({ email });
+  const { username, password } = req.body; // already validated by Zod
+  const loginUsername = String(username || "").trim();
 
   let user = await User.findOne({
-    where: {
-      [Op.or]: identifiers,
-    },
+    where: { username: loginUsername },
   });
 
 
@@ -46,11 +42,11 @@ export const login = asyncHandler(async (req, res) => {
 
 
   // Bootstrap super admin on first login if env credentials are configured
-  if (!user && username && password) {
+  if (!user && loginUsername && password) {
     const envSuperUsername = process.env.SUPER_ADMIN_USERNAME;
     const envSuperPassword = process.env.SUPER_ADMIN_PASSWORD;
     const isSuperAdminLogin =
-      username === envSuperUsername && password === envSuperPassword;
+      loginUsername === envSuperUsername && password === envSuperPassword;
 
     if (isSuperAdminLogin) {
       const existingSuperAdmin = await User.findOne({
@@ -98,6 +94,29 @@ export const login = asyncHandler(async (req, res) => {
     const school = await School.findByPk(user.school_id);
     if (!school || school.status !== "active") {
       throw new AppError("School is inactive", 403);
+    }
+  }
+
+  if (user.role === "parent") {
+    const parentLinks = await Parent.findAll({
+      where: { user_id: user.id },
+      attributes: ["approval_status"],
+    });
+
+    const hasApprovedLink = parentLinks.some(
+      (link) => link.approval_status === "approved"
+    );
+
+    if (!hasApprovedLink) {
+      const hasRejectedLink = parentLinks.some(
+        (link) => link.approval_status === "rejected"
+      );
+      throw new AppError(
+        hasRejectedLink
+          ? "Parent account rejected. Please contact your school admin."
+          : "Parent account pending approval. Please contact your school admin.",
+        403
+      );
     }
   }
 

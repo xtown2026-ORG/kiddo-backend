@@ -7,6 +7,7 @@ import {
   listParentOptionsService,
 } from "./parent.service.js";
 import { listApprovedParentLinks } from "./parent.family.service.js";
+import Parent from "./parent.model.js";
 
 /* =========================
    ADMIN
@@ -126,6 +127,21 @@ export const getMyProfile = async (req, res, next) => {
       return res.json(req.user);
     }
 
+    const parentLinks = await Parent.findAll({
+      where: { user_id: req.user.id },
+      attributes: ["id", "student_id", "relation_type", "approval_status"],
+      order: [["created_at", "ASC"]],
+    });
+    const rawParentLinks = parentLinks.map((link) => link.toJSON());
+    const approvalStatus = rawParentLinks.some(
+      (link) => link.approval_status === "approved"
+    )
+      ? "approved"
+      : rawParentLinks.length > 0 &&
+          rawParentLinks.every((link) => link.approval_status === "rejected")
+        ? "rejected"
+        : "pending";
+
     const links = await listApprovedParentLinks({
       parent_user_id: req.user.id,
       school_id: req.user.school_id,
@@ -152,12 +168,15 @@ export const getMyProfile = async (req, res, next) => {
 
     res.json({
       ...parentUser.toJSON(),
-      relation_type: links[0]?.relation_type || "guardian",
+      approval_status: approvalStatus,
+      parent_links: rawParentLinks,
+      relation_type: links[0]?.relation_type || rawParentLinks[0]?.relation_type || "guardian",
       student: primaryStudent,
       linked_students: uniqueStudents,
       phone: resolvedPhone,
       user: {
         ...parentUser.toJSON(),
+        approval_status: approvalStatus,
         phone: resolvedPhone,
       },
     });
