@@ -5,6 +5,8 @@ import Subject from "../subjects/subject.model.js";
 import Class from "../classes/classes.model.js";
 import Parent from "../parents/parent.model.js";
 import Student from "../students/student.model.js";
+import User from "../users/user.model.js";
+import HomeworkReadStatus from "./homework-read-status.model.js";
 import AppError from "../../shared/appError.js";
 import { triggerHomeworkNotification } from "../notifications/notification-trigger.service.js";
 import { getPagination } from "../../shared/utils/pagination.js";
@@ -18,6 +20,9 @@ export const createHomeworkService = async ({
   section_id,
   teacher_assignment_id,
   homework_date,
+  title,
+  due_date,
+  attachment_url,
   description,
 }) => {
   // 1️⃣ Validate section
@@ -58,6 +63,9 @@ export const createHomeworkService = async ({
     teacher_assignment_id: assignment.id,
     subject_id: assignment.subject_id, // derived
     homework_date,
+    title: title || null,
+    due_date: due_date || null,
+    attachment_url: attachment_url || null,
     description,
     created_by: user.id,
   });
@@ -73,6 +81,7 @@ export const createHomeworkService = async ({
 
   return homework;
 };
+
 export const listHomeworkService = async ({
   user,
   school_id,
@@ -93,9 +102,12 @@ export const listHomeworkService = async ({
     where.created_at = { [Op.between]: [start, end] };
   }
 
+  let isStudentOrParent = false;
+
   if (user?.role === "student") {
     where.class_id = user.class_id;
     where.section_id = user.section_id;
+    isStudentOrParent = true;
   } else if (user?.role === "parent") {
     const links = await listApprovedParentLinks({
       parent_user_id: user.id,
@@ -115,6 +127,7 @@ export const listHomeworkService = async ({
     }
     where.class_id = student.class_id;
     where.section_id = student.section_id;
+    isStudentOrParent = true;
   } else if (user?.role === "teacher") {
     const assignments = await TeacherAssignment.findAll({
       where: {
@@ -186,15 +199,120 @@ export const listHomeworkService = async ({
     if (section_id) where.section_id = section_id;
   }
 
+  // Include models based on role
+  const includeModels = [
+    { model: Subject, attributes: ["id", "name"] },
+    { model: Class, attributes: ["id", "class_name"] },
+    { model: Section, attributes: ["id", "name"] },
+    { model: User, attributes: ["id", "name", "role"] },
+  ];
+
+  if (isStudentOrParent) {
+    // Return the read status for this specific student only
+    includeModels.push({
+      model: HomeworkReadStatus,
+      where: {
+        student_id: user.role === "student" ? user.student_id : student_id
+      },
+      required: false, // LEFT JOIN so unread homeworks still appear
+    });
+  } else {
+    // Teachers/Admins: Return all read statuses to see who has read it
+    includeModels.push({
+      model: HomeworkReadStatus,
+      required: false,
+    });
+    // And include students in the section so the frontend can cross-reference
+    // Wait, Section is already included. We just need to load Section.students
+    includeModels.find(m => m.model === Section).include = [
+      { 
+        model: Student, 
+        attributes: ["id", "admission_no", "user_id"],
+        include: [{ model: User, attributes: ["id", "name", "role"] }]
+      }
+    ];
+  }
+
   return Homework.findAndCountAll({
     where,
-    include: [
-      { model: Subject, attributes: ["id", "name"] },
-      { model: Class, attributes: ["id", "class_name"] },
-      { model: Section, attributes: ["id", "name"] },
-    ],
+    include: includeModels,
     order: [["homework_date", "DESC"], ["created_at", "DESC"]],
     limit,
     offset,
+    distinct: true, // Needed when using hasMany inside findAndCountAll
   });
+};
+
+export const updateHomeworkService = async ({ id, user, ...data }) => {
+  const homework = await Homework.findByPk(id);
+  if (!homework) {
+    throw new AppError("Homework not found", 404);
+  }
+
+  // Allow if school_admin OR created by this user
+  if (user.role !== "school_admin" && user.role !== "super_admin" && String(homework.created_by) !== String(user.id)) {
+    throw new AppError("Not authorized to update this homework", 403);
+  }
+
+  await homework.update({
+    ...data,
+    title: data.title !== undefined ? data.title : homework.title,
+    due_date: data.due_date !== undefined ? data.due_date : homework.due_date,
+    attachment_url: data.attachment_url !== undefined ? data.attachment_url : homework.attachment_url,
+  });
+  return homework;
+};
+
+export const deleteHomeworkService = async ({ id, user }) => {
+  const homework = await Homework.findByPk(id);
+  if (!homework) {
+    throw new AppError("Homework not found", 404);
+  }
+
+  // Allow if school_admin OR created by this user
+  if (user.role !== "school_admin" && user.role !== "super_admin" && String(homework.created_by) !== String(user.id)) {
+    throw new AppError("Not authorized to delete this homework", 403);
+  }
+
+  await homework.destroy();
+  return { success: true };
+};
+
+export const markHomeworkAsReadService = async ({ homework_id, user, student_id }) => {
+  const targetStudentId = user.role === "student" ? user.student_id : student_id;
+  
+  if (!targetStudentId) {
+    throw new AppError("Student ID is required", 400);
+  }
+
+  // Find or create read status
+  const [readStatus, created] = await HomeworkReadStatus.findOrCreate({
+    where: {
+      homework_id,
+      student_id: targetStudentId,
+    },
+    defaults: {
+      homework_id,
+      student_id: targetStudentId,
+      student_read_at: user.role === "student" ? new Date() : null,
+      parent_read_at: user.role === "parent" ? new Date() : null,
+    },
+  });
+
+  // If already exists, just update the relevant timestamp if it's null
+  if (!created) {
+    let changed = false;
+    if (user.role === "student" && !readStatus.student_read_at) {
+      readStatus.student_read_at = new Date();
+      changed = true;
+    } else if (user.role === "parent" && !readStatus.parent_read_at) {
+      readStatus.parent_read_at = new Date();
+      changed = true;
+    }
+    if (changed) {
+      await readStatus.save();
+    }
+  }
+
+  return readStatus;
 };

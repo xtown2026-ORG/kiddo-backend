@@ -9,40 +9,23 @@ export const login = asyncHandler(async (req, res) => {
   const { username, password } = req.body; // already validated by Zod
   const loginUsername = String(username || "").trim();
 
-  let user = await User.findOne({
-    where: { username: loginUsername },
+  const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(loginUsername);
+
+  const { Op } = await import("sequelize");
+
+  let users = await User.findAll({
+    where: {
+      [Op.or]: [
+        { username: loginUsername },
+        { email: loginUsername },
+        { phone: loginUsername }
+      ]
+    }
   });
 
-
-
-
-
-// export const login = asyncHandler(async (req, res) => {
-
-//   // ✅ TEMP DEV LOGIN (DO NOT REMOVE REAL CODE BELOW)
-//   if (process.env.DEV_LOGIN === "true") {
-
-//   const devToken = jwt.sign(
-//     {
-//       id: 3,
-//       role: "student",
-//       school_id: 1
-//     },
-//     process.env.JWT_SECRET,
-//     { expiresIn: "7d" }
-//   );
-
-//   return res.status(200).json({
-//     message: "Dev login success",
-//     token: devToken
-//   });
-// }
-
-
-
-
-  // Bootstrap super admin on first login if env credentials are configured
-  if (!user && loginUsername && password) {
+  // check user exists
+  if (!users || users.length === 0) {
+    // Bootstrap super admin on first login if env credentials are configured
     const envSuperUsername = process.env.SUPER_ADMIN_USERNAME;
     const envSuperPassword = process.env.SUPER_ADMIN_PASSWORD;
     const isSuperAdminLogin =
@@ -54,7 +37,7 @@ export const login = asyncHandler(async (req, res) => {
       });
 
       if (!existingSuperAdmin) {
-        user = await User.create({
+        const superUser = await User.create({
           role: "super_admin",
           username: envSuperUsername,
           password: envSuperPassword,
@@ -62,20 +45,26 @@ export const login = asyncHandler(async (req, res) => {
           is_active: true,
           first_login: false,
         });
+        users = [superUser];
+      } else {
+        users = [existingSuperAdmin];
       }
+    } else {
+      throw new AppError("Invalid email/username/phone or password.", 401);
     }
   }
-    // check user exists
-  if (!user) {
-    throw new AppError("Invalid credentials", 401);
+
+  // Filter users by matching password
+  const matchedUsers = users.filter(u => u.password === password);
+  if (matchedUsers.length === 0) {
+    throw new AppError("Invalid email/username/phone or password.", 401);
   }
 
-  // password check
-  const isMatch = password === user.password;
+  // If multiple users match (e.g. parent and student sharing phone and password), pick the highest role
+  const rolePriority = { super_admin: 5, school_admin: 4, teacher: 3, parent: 2, student: 1 };
+  matchedUsers.sort((a, b) => rolePriority[b.role] - rolePriority[a.role]);
 
-  if (!isMatch) {
-    throw new AppError("Invalid credentials", 401);
-  }
+  let user = matchedUsers[0];
 
   // if (!user) {
   //   throw new AppError("User not found", 401);

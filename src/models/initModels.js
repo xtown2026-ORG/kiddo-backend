@@ -15,6 +15,8 @@ import AITestAssignment from "../modules/ai-test-assignments/ai-test-assignment.
 import AITestSubmission from "../modules/ai-test-assignments/ai-test-submission.model.js";
 
 
+
+
 /* ===================== ACADEMICS ===================== */
 import Class from "../modules/classes/classes.model.js";
 import Subject from "../modules/subjects/subject.model.js";
@@ -24,6 +26,7 @@ import Section from "../modules/sections/section.model.js";
 //homework
 import Homework from "../modules/homework/homework.model.js";
 import HomeworkSubmission from "../modules/homework/homework-submission.model.js";
+import HomeworkReadStatus from "../modules/homework/homework-read-status.model.js";
 
 
 /* ===================== ACTIVITY ===================== */
@@ -271,6 +274,12 @@ const initAssociations = () => {
     foreignKey: "homework_id",
     onDelete: "CASCADE",
   });
+
+  Homework.hasMany(HomeworkReadStatus, { foreignKey: "homework_id", onDelete: "CASCADE" });
+  HomeworkReadStatus.belongsTo(Homework, { foreignKey: "homework_id" });
+
+  Student.hasMany(HomeworkReadStatus, { foreignKey: "student_id", onDelete: "CASCADE" });
+  HomeworkReadStatus.belongsTo(Student, { foreignKey: "student_id" });
 
 
   /* ==================== TOKENS ==================== */

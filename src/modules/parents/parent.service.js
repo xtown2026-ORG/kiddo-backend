@@ -159,7 +159,7 @@ export const updateParentProfileService = async (user_id, data) => {
         phone: data.phone,
         id: { [Op.ne]: user_id },
       },
-      attributes: ["id", "role"],
+      attributes: ["id", "role", "school_id"],
     });
 
     if (existingPhoneUser) {
@@ -169,7 +169,7 @@ export const updateParentProfileService = async (user_id, data) => {
       });
 
       if (
-        existingPhoneUser.role === "parent" &&
+        ["parent", "teacher", "student"].includes(existingPhoneUser.role) &&
         Number(existingPhoneUser.school_id) === Number(user.school_id)
       ) {
         sharedLinkedStudentPhone = true;
@@ -212,8 +212,7 @@ export const updateParentProfileService = async (user_id, data) => {
     }
   }
 
-  const normalizedRelationType =
-    data?.relation_type === "parent" ? "guardian" : data?.relation_type;
+  const normalizedRelationType = data?.relation_type;
   const userUpdateData = { ...data };
 
   delete userUpdateData.relation_type;

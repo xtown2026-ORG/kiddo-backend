@@ -63,6 +63,21 @@ const Homework = db.define("homework", {
     allowNull: false,
   },
 
+  title: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+
+  due_date: {
+    type: DataTypes.DATEONLY,
+    allowNull: true,
+  },
+
+  attachment_url: {
+    type: DataTypes.STRING(1000),
+    allowNull: true,
+  },
+
   description: {
     type: DataTypes.TEXT,
     allowNull: false,

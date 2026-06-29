@@ -286,6 +286,17 @@ try {
     await db.query(
       'DROP INDEX IF EXISTS "teacher_assignments_school_id_teacher_id_class_id_section_id_su";'
     );
+    
+    // Homework ERP Module fields
+    await db.query(
+      "ALTER TABLE homeworks ADD COLUMN IF NOT EXISTS title VARCHAR(255);"
+    );
+    await db.query(
+      "ALTER TABLE homeworks ADD COLUMN IF NOT EXISTS due_date DATE;"
+    );
+    await db.query(
+      "ALTER TABLE homeworks ADD COLUMN IF NOT EXISTS attachment_url VARCHAR(1000);"
+    );
   } catch (e) {
     // Ignore if the table doesn't exist yet (fresh DB); `sync()` will create it.
   }

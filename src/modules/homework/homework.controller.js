@@ -3,6 +3,9 @@ import AppError from "../../shared/appError.js";
 import {
   createHomeworkService,
   listHomeworkService,
+  updateHomeworkService,
+  deleteHomeworkService,
+  markHomeworkAsReadService,
 } from "./homework.service.js";
 import {
   getHomeworkSummaryService,
@@ -20,6 +23,33 @@ export const createHomework = asyncHandler(async (req, res) => {
   res.status(201).json({
     success: true,
     data: homework,
+  });
+});
+
+/* TEACHER: UPDATE */
+export const updateHomework = asyncHandler(async (req, res) => {
+  const homework = await updateHomeworkService({
+    id: req.params.id,
+    user: req.user,
+    ...req.body,
+  });
+
+  res.json({
+    success: true,
+    data: homework,
+  });
+});
+
+/* TEACHER: DELETE */
+export const deleteHomework = asyncHandler(async (req, res) => {
+  await deleteHomeworkService({
+    id: req.params.id,
+    user: req.user,
+  });
+
+  res.json({
+    success: true,
+    message: "Homework deleted successfully",
   });
 });
 
@@ -60,4 +90,17 @@ export const getHomeworkStudentStatus = asyncHandler(async (req, res) => {
   }
 
   res.json({ success: true, data });
+});
+
+export const markHomeworkAsRead = asyncHandler(async (req, res) => {
+  const result = await markHomeworkAsReadService({
+    homework_id: req.params.id,
+    user: req.user,
+    student_id: req.body.student_id,
+  });
+
+  res.json({
+    success: true,
+    data: result,
+  });
 });

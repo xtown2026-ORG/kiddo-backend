@@ -7,6 +7,9 @@ export const createHomeworkSchema = z.object({
   teacher_assignment_id: z.coerce.number().int().positive(),
   subject_id: z.coerce.number().int().positive().optional(),
   homework_date: z.string(), // YYYY-MM-DD
+  title: z.string().min(1),
+  due_date: z.string(),
+  attachment_url: z.union([z.string().url(), z.literal(""), z.literal(null)]).optional(),
   description: z.string().min(1),
 });
 
@@ -21,6 +24,17 @@ export const listHomeworkSchema = z.object({
   }),
 });
 
+export const updateHomeworkSchema = z.object({
+  class_id: z.coerce.number().int().positive().optional(),
+  section_id: z.coerce.number().int().positive().optional(),
+  teacher_assignment_id: z.coerce.number().int().positive().optional(),
+  subject_id: z.coerce.number().int().positive().optional(),
+  homework_date: z.string().optional(),
+  title: z.string().min(1).optional(),
+  due_date: z.string().optional(),
+  attachment_url: z.union([z.string().url(), z.literal(""), z.literal(null)]).optional(),
+  description: z.string().min(1).optional(),
+});
 
 export const submitHomeworkSchema = z.object({
   is_completed: z.boolean(),

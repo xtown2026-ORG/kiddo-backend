@@ -130,7 +130,11 @@ export const completeTeacherProfile = asyncHandler(async (req, res) => {
         if (phone) {
           const existingPhone = await User.findOne({ where: { phone }, transaction });
           if (existingPhone && existingPhone.id !== req.user.id) {
-            throw new AppError("Phone already in use", 400);
+            const isSharedRole = ["parent", "teacher", "student"].includes(existingPhone.role);
+            const isSameSchool = Number(existingPhone.school_id) === Number(req.user.school_id);
+            if (!isSharedRole || !isSameSchool) {
+              throw new AppError("Phone already in use", 400);
+            }
           }
         }
 

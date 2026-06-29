@@ -702,11 +702,8 @@ export async function generateQuizFromAi({
       contents: prompt,
     });
   } catch (err) {
-    if (!isQuotaError(err)) {
-      throw new AppError("Failed to generate quiz from AI", 502);
-    }
-
-    // Gemini quota exceeded: fallback to local quiz generation so API does not fail with 500.
+    console.error("Gemini AI Generation Error:", err);
+    // AI failed (Quota, 503 Overload, 500, etc.): fallback to local quiz generation so API does not fail.
     const fallbackRows = fillMissingQuestions({
       questions: [],
       topic,

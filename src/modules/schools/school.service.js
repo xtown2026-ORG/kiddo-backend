@@ -68,6 +68,7 @@ if (existingUser) {
     role: "school_admin",
     school_id: school.id,
     username: admin_username,
+    email: email,
     password: admin_password,
     first_login: true,
     is_active: true,
