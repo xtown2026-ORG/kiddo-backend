@@ -60,8 +60,16 @@ const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
     origin: ALLOWED_ORIGINS,
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Chat-Language"],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-Chat-Language",
+      "Cache-Control",
+      "Pragma",
+      "Expires",
+      "X-Requested-With"
+    ],
     credentials: true,
   },
 });
@@ -73,10 +81,19 @@ initNotificationSocket(io);
 // MIDDLEWARES
 app.use(cors({
   origin: ALLOWED_ORIGINS,
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Chat-Language"],
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "X-Chat-Language",
+    "Cache-Control",
+    "Pragma",
+    "Expires",
+    "X-Requested-With"
+  ],
   credentials: true,
 }));
+
 
 app.use(express.json({ limit: "10mb" }));
 app.use(helmet());
@@ -85,6 +102,19 @@ app.use(
   "/uploads/ai-followups",
   express.static(path.join(process.cwd(), "uploads", "ai-followups"))
 );
+
+app.use(express.json({ limit: "10mb" }));
+app.use(helmet());
+app.use(morgan("dev"));
+app.use(
+  "/uploads",
+  express.static(path.join(process.cwd(), "uploads"))
+);
+app.use(
+  "/uploads/ai-followups",
+  express.static(path.join(process.cwd(), "uploads", "ai-followups"))
+);
+
 
 
 // HEALTH CHECK
