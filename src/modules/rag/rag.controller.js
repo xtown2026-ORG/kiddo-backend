@@ -583,7 +583,7 @@ export const askQuestion = asyncHandler(async (req, res) => {
     book,
     chapter,
   } = payload;
-  const voiceEnabled = req.query.voice === "true";
+  const voice = req.query.voice === "true";
   const headerLanguage = req.headers["x-chat-language"];
   const queryLanguage = req.query.lang;
 
@@ -686,8 +686,38 @@ export const askQuestion = asyncHandler(async (req, res) => {
     };
   }
 
+  const source_type = result?.source_type;
+  const source = result?.source;
+  const answer_source = result?.answer_source;
+  const filters_used = result?.filters_used;
+  const metadata_source_type = result?.metadata?.source_type;
+  const hasGeminiSolverMarker = (value) => {
+    const marker = String(value || "").toLowerCase();
+    return marker.includes("gemini") || marker.includes("solver");
+  };
+  const isGeminiSolverAnswer =
+    hasGeminiSolverMarker(source_type) ||
+    hasGeminiSolverMarker(source) ||
+    hasGeminiSolverMarker(answer_source) ||
+    hasGeminiSolverMarker(filters_used) ||
+    hasGeminiSolverMarker(metadata_source_type);
+
+  const isPureRagAnswer =
+    source_type === "rag" &&
+    !isGeminiSolverAnswer;
+  const shouldGenerateVoice = voice && isPureRagAnswer;
+
+  console.log("VOICE_DECISION", {
+    source_type,
+    source,
+    answer_source,
+    filters_used,
+    metadata_source_type,
+    shouldGenerateVoice
+  });
+
   // 🔹 TEXT-ONLY (default)
-  if (!voiceEnabled) {
+  if (!shouldGenerateVoice) {
     const inlineQuestionLanguage = extractLanguageFromQuestionText(cleanedQuestion);
     const requestedLanguage =
       inlineQuestionLanguage ||

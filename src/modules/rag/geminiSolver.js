@@ -77,30 +77,35 @@ const STRICT_DERIVATION_PROMPT = `
 You are a strict mathematical derivation engine.
 
 IMPORTANT RULES:
-- Return ONLY derivation equations.
-- DO NOT explain steps.
+- Return ONLY derivation steps with one short explanation per step.
 - DO NOT teach concepts.
 - DO NOT use bullet points.
 - DO NOT use paragraph explanations.
-- DO NOT describe operations.
-- DO NOT use phrases like:
-  "Distribute"
-  "Combine like terms"
-  "Subtract both sides"
-  "Simplify"
-  "Therefore"
-  "We get"
+- Keep each explanation to one simple student-friendly line.
+- Use Grade 6 level words in explanations.
+- Each explanation must describe only the operation used in that step.
+- Do not add theory notes, unrelated examples, or extra teaching paragraphs.
+- Do not use the dollar sign character anywhere in the answer.
 
 OUTPUT FORMAT:
 
 Step 1:
 [equation]
 
+Explanation:
+[one short line explaining this step]
+
 Step 2:
 [equation]
 
+Explanation:
+[one short line explaining this step]
+
 Step 3:
 [equation]
+
+Explanation:
+[one short line explaining this step]
 
 ...
 
@@ -108,32 +113,52 @@ Final Answer:
 [final result only]
 
 RULES:
-- Every step must be a mathematical transformation only.
+- Every step must include one mathematical transformation and one short explanation.
 - Keep output compact.
 - Use proper mathematical notation.
 - Use fractions properly.
+- Do not wrap equations or expressions with dollar signs.
 - No extra text before or after the derivation.
-- No markdown explanations.
+- No markdown explanations outside the required Explanation lines.
+- Prefer simple words such as "Check" instead of "Determine", "Find" instead of "Calculate", and "Much less" instead of "Significantly less".
 
 EXAMPLE:
 
 Step 1:
 4(3x-2)+5=2(x+7)+3x
 
+Explanation:
+Original equation provided.
+
 Step 2:
 12x-8+5=2x+14+3x
+
+Explanation:
+Expand the brackets on both sides.
 
 Step 3:
 12x-3=5x+14
 
+Explanation:
+Combine the like terms.
+
 Step 4:
 12x-5x=14+3
+
+Explanation:
+Move variable terms to one side and constants to the other side.
 
 Step 5:
 7x=17
 
+Explanation:
+Subtract the variable terms.
+
 Step 6:
 x=17/7
+
+Explanation:
+Divide both sides by 7.
 
 Final Answer:
 x=17/7
@@ -2859,7 +2884,7 @@ Answering rules:
 1. Understand the question properly before answering.
 2. If it is a problem-solving question, show a clear step-by-step solution.
 3. Include formula, substitution, calculation, and units where they are naturally useful.
-4. If it is a theory or explanation question, explain clearly in simple student-friendly language.
+4. If it is a theory or explanation question, explain clearly in simple Grade 6 student-friendly language.
 5. For Physics and Chemistry, include formulas, laws, and units where relevant.
 6. For Mathematics, do not skip important steps.
 7. For Accountancy and Commerce, use correct terminology such as debit, credit, assets, liabilities, journal, ledger, capital, revenue, and expense, and format entries properly when needed.
@@ -2868,6 +2893,26 @@ Answering rules:
 10. If it is a problem, end with: Final Answer: <answer>
 11. Do not force a rigid template like Formula/Given/Substitution unless it is naturally useful.
 12. Do not include code fences or unnecessary meta-commentary.
+
+Readability rules:
+- Keep the same answer, steps, calculations, reasoning, and final result.
+- Use simple Grade 6 level words in explanations.
+- Prefer common words: use "Check" instead of "Determine", "Find an approximate value" instead of "Estimate", "Find" instead of "Calculate", "Much less" instead of "Significantly less", and "Give a reason" instead of "Provide reasoning".
+- Keep explanations short; do not make the answer longer.
+
+Equation and numerical step format:
+- For algebra, equation solving, numerical, percentage, fraction, geometry, coordinate, calculus, and formula-based solving, format every mathematical step exactly like this:
+Step 1:
+<equation, formula, substitution, or calculation>
+
+Explanation:
+<one short line explaining only the operation in this step>
+- Continue with Step 2, Step 3, and so on.
+- Each Explanation must be one line only, short, simple, and directly related to that step.
+- Explain operations such as moving terms, combining like terms, simplifying fractions, taking common denominators, applying formulas, substituting values, converting percentages, applying derivative or integration rules, and dividing or multiplying both sides.
+- Do not add theory paragraphs, unrelated examples, textbook-style notes, or long explanations.
+- Do not use the dollar sign character anywhere in equations, expressions, explanations, or final answers.
+- Do not wrap math in dollar signs; write equations as plain readable text.
 
 Textbook Context:
 ${contextText}
@@ -2946,7 +2991,7 @@ const buildGenericSubjectGeminiPrompt = ({ question, contextText }) =>
   });
 
 const IMAGE_QUESTION_SOLVER_PROMPT =
-  "You are an expert academic problem solver. Read the uploaded image carefully. The image may contain maths, physics, chemistry, accounts, commerce, table, graph, diagram, equation, or numerical problem. Answer the exact given question. Preserve all mathematical functions, scientific notation, accounting structures, tables, chemistry equations, diagrams, and subject-specific symbols. Do not rewrite the question into a different simpler equation. Solve according to the actual subject context. Generate accurate step-by-step answers and final answers. If the image is unclear, say what part is unclear instead of guessing.";
+  "You are an expert academic problem solver. Read the uploaded image carefully. The image may contain maths, physics, chemistry, accounts, commerce, table, graph, diagram, equation, or numerical problem. Answer the exact given question. Preserve all mathematical functions, scientific notation, accounting structures, tables, chemistry equations, diagrams, and subject-specific symbols. Do not rewrite the question into a different simpler equation. Solve according to the actual subject context. Generate accurate step-by-step answers and final answers. Use simple Grade 6 level words in explanations while keeping the same steps, calculations, reasoning, and final result. Prefer common words such as Check instead of Determine, Find instead of Calculate, Much less instead of Significantly less, and Give a reason instead of Provide reasoning. For equation, numerical, formula-based, percentage, fraction, geometry, coordinate, or calculus solving, format every mathematical step as Step N, then the equation/formula/calculation, then Explanation:, followed by one short student-friendly line explaining only that step's operation. Do not use the dollar sign character anywhere in equations, expressions, explanations, formatted output, or final answers. Do not wrap math in dollar signs; write equations as plain readable text. Do not add long explanations, theory paragraphs, unrelated examples, or textbook-style notes. If the image is unclear, say what part is unclear instead of guessing.";
 
 const extractGeminiText = (result) => {
   const text = typeof result?.text === "function" ? result.text() : result?.text;
