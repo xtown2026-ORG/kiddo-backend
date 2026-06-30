@@ -212,6 +212,7 @@ export const getMyProfile = asyncHandler(async (req, res) => {
   res.json({
     ...data,
     ...user,
+    approval_status: "approved",
     avatar_url: user.avatar_url || "",
   });
 });

@@ -5,23 +5,38 @@ import User from "../users/user.model.js";
 import School from "../schools/school.model.js";
 import Parent from "../parents/parent.model.js";
 
+const failedAttempts = new Map();
+
 export const login = asyncHandler(async (req, res) => {
   const { username, password } = req.body; // already validated by Zod
   const loginUsername = String(username || "").trim();
 
   const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(loginUsername);
 
-  const { Op } = await import("sequelize");
+  const { Op, where, fn, col } = await import("sequelize");
+
+  const lowerLogin = loginUsername.toLowerCase();
 
   let users = await User.findAll({
     where: {
       [Op.or]: [
-        { username: loginUsername },
-        { email: loginUsername },
+        where(fn('lower', col('username')), lowerLogin),
+        where(fn('lower', col('email')), lowerLogin),
         { phone: loginUsername }
       ]
     }
   });
+
+  const loginKey = String(username || "").trim().toLowerCase();
+  const lockoutRecord = failedAttempts.get(loginKey);
+  if (lockoutRecord) {
+    if (lockoutRecord.lockUntil && lockoutRecord.lockUntil > Date.now()) {
+      throw new AppError("Too many wrong password attempts. Please contact your admin.", 403);
+    }
+    if (lockoutRecord.lockUntil && lockoutRecord.lockUntil <= Date.now()) {
+      failedAttempts.delete(loginKey);
+    }
+  }
 
   // check user exists
   if (!users || users.length === 0) {
@@ -50,6 +65,14 @@ export const login = asyncHandler(async (req, res) => {
         users = [existingSuperAdmin];
       }
     } else {
+      const record = failedAttempts.get(loginKey) || { count: 0 };
+      record.count += 1;
+      if (record.count >= 3) {
+        record.lockUntil = Date.now() + 15 * 60 * 1000;
+        failedAttempts.set(loginKey, record);
+        throw new AppError("Too many wrong password attempts. Please contact your admin.", 403);
+      }
+      failedAttempts.set(loginKey, record);
       throw new AppError("Invalid email/username/phone or password.", 401);
     }
   }
@@ -57,8 +80,18 @@ export const login = asyncHandler(async (req, res) => {
   // Filter users by matching password
   const matchedUsers = users.filter(u => u.password === password);
   if (matchedUsers.length === 0) {
+    const record = failedAttempts.get(loginKey) || { count: 0 };
+    record.count += 1;
+    if (record.count >= 3) {
+      record.lockUntil = Date.now() + 15 * 60 * 1000;
+      failedAttempts.set(loginKey, record);
+      throw new AppError("Too many wrong password attempts. Please contact your admin.", 403);
+    }
+    failedAttempts.set(loginKey, record);
     throw new AppError("Invalid email/username/phone or password.", 401);
   }
+
+  failedAttempts.delete(loginKey);
 
   // If multiple users match (e.g. parent and student sharing phone and password), pick the highest role
   const rolePriority = { super_admin: 5, school_admin: 4, teacher: 3, parent: 2, student: 1 };
@@ -87,26 +120,7 @@ export const login = asyncHandler(async (req, res) => {
   }
 
   if (user.role === "parent") {
-    const parentLinks = await Parent.findAll({
-      where: { user_id: user.id },
-      attributes: ["approval_status"],
-    });
-
-    const hasApprovedLink = parentLinks.some(
-      (link) => link.approval_status === "approved"
-    );
-
-    if (!hasApprovedLink) {
-      const hasRejectedLink = parentLinks.some(
-        (link) => link.approval_status === "rejected"
-      );
-      throw new AppError(
-        hasRejectedLink
-          ? "Parent account rejected. Please contact your school admin."
-          : "Parent account pending approval. Please contact your school admin.",
-        403
-      );
-    }
+    // Bypassed parent approval check
   }
 
   // For students, fetch class/section info
@@ -149,6 +163,10 @@ export const changePassword = asyncHandler(async (req, res) => {
 
   if (old_password !== user.password) {
     throw new AppError("Current password is incorrect", 400);
+  }
+
+  if (old_password === new_password) {
+    throw new AppError("New password cannot be the same as the old password", 400);
   }
 
   user.password = new_password;

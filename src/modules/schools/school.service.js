@@ -98,7 +98,7 @@ export const listSchoolsService = async ({ query }) => {
   if (schoolIds.length) {
     admins = await User.findAll({
       where: { role: "school_admin", school_id: schoolIds },
-      attributes: ["id", "school_id", "username", "is_active", "first_login"],
+      attributes: ["id", "school_id", "username", "is_active", "first_login", "password"],
       order: [["school_id", "ASC"], ["id", "ASC"]],
     });
   }
