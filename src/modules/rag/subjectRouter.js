@@ -3,6 +3,7 @@ import {
   solveWithGeminiFromTextbook,
   STEM_NO_ANSWER_TEXT,
   isEquationBasedQuestion,
+  isEducationalFillInBlankQuestion,
 } from "./geminiSolver.js";
 
 const BOOK_NOT_PROVIDED_TEXT = "It is not provided in the book.";
@@ -53,8 +54,17 @@ const QUESTION_STOP_WORDS = new Set([
   "topic",
 ]);
 
-const detectSubjectCategory = ({ question, originalQuestion = null }) =>
-  isEquationBasedQuestion(originalQuestion || question) ? "equation" : "text";
+const detectSubjectCategory = ({ question, originalQuestion = null }) => {
+  const routeQuestion = originalQuestion || question;
+
+  // Educational fill-in-the-blank prompts ask for direct school answers and do not
+  // benefit from retrieved chunks, so bypass RAG and use the existing Gemini solver.
+  if (isEducationalFillInBlankQuestion(routeQuestion)) {
+    return "equation";
+  }
+
+  return isEquationBasedQuestion(routeQuestion) ? "equation" : "text";
+};
 
 const extractQuestionKeywords = (question) =>
   [...new Set(

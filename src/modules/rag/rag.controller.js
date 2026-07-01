@@ -1,7 +1,12 @@
 import asyncHandler from "../../shared/asyncHandler.js";
 import { GoogleGenAI } from "@google/genai";
 import { routeRagQuestion } from "./subjectRouter.js";
-import { solveImageQuestionWithGemini } from "./geminiSolver.js";
+import {
+  isEducationalFillInBlankQuestion,
+  isEquationBasedQuestion,
+  solveImageQuestionWithGemini,
+  solveWithGeminiFromTextbook,
+} from "./geminiSolver.js";
 import { buildStudentFollowupSuggestions } from "../ai-followup/aiFollowup.service.js";
 import {
   chunkText,
@@ -447,6 +452,153 @@ const shouldAttachStudentFollowups = ({ userRole, question, answer }) =>
   String(question || "").trim() &&
   String(answer || "").trim();
 
+const PERSONAL_CHAT_PATTERN =
+  /^(?:hi|hello|hey|good\s+(?:morning|afternoon|evening|night)|thanks?|thank\s+you|bye|goodbye|how\s+are\s+you|who\s+are\s+you|what\s+is\s+your\s+name|tell\s+me\s+a\s+joke|can\s+you\s+help\s+me)\b/i;
+const STUDY_QUESTION_INTENT_PATTERN =
+  /\b(?:what\s+is|what\s+are|how\s+many|how\s+much|why|define|explain|describe|state|list|observe|write(?:\s+down)?|solve|calculate|find|determine|evaluate|compute|simplify|derive|prove|verify|prepare|record|journal(?:ise|ize)?|pass\s+journal\s+entries|fill|complete|true\s+or\s+false|choose|identify|differentiate|distinguish|compare|arrange|order)\b/i;
+const MATHS_STUDY_PATTERN =
+  /\b(?:maths?|mathematics|numbers?|number\s+systems?|numbering\s+systems?|indian\s+numbering\s+systems?|international\s+numbering\s+systems?|place\s+values?|face\s+values?|expanded\s+forms?|standard\s+forms?|digits?|smallest\s+\d+\s*-?\s*digit|largest\s+\d+\s*-?\s*digit|smallest\s+number|largest\s+number|comparison\s+of\s+numbers?|compare\s+numbers?|ascending\s+order|descending\s+order|greater\s+than|less\s+than|ones?|tens?|hundreds?|thousands?|ten\s+thousands?|lakhs?|crores?|commas?|groups?|arithmetic|addition|subtraction|multiplication|division|calculations?|calculate|formulas?|geometry|algebra|measurements?|word\s+problems?|mathematical\s+(?:concepts?|word\s+problems?)|fractions?|decimals?|percentages?|ratio|sum|difference|product|quotient|multiples?|factors?|prime|composite|successor|predecessor|perimeter|area|volume|equations?)\b/i;
+const INDIAN_GROUPED_NUMBER_PATTERN = /\b\d{1,2},\d{2},\d{2},\d{3}\b/;
+const INTERNATIONAL_FORMATTING_PATTERN =
+  /\b(?:international\s+(?:system|numbering\s+system)|standard\s+(?:numeral|number)\s+(?:grouping|format(?:ting)?)|place\s+value\s+format(?:ting)?|(?:use|insert|put|place)\s+commas?|write\b.+\b(?:with|using)\s+commas?)\b/i;
+const MATHS_REASONING_PATTERN =
+  /\b(?:largest|smallest|greater|least|greatest|compare|comparison|ascending|descending|arrange|arranging|order|ordering|form|forming|make|construct|construction|write\s+any|digit\s+placement|with\s+constraints?|conditions?|rules?|ten\s+lakhs?|ten\s+thousand(?:s|th)?|lakhs?|crores?)\b/i;
+const NUMERIC_COMPARISON_OR_ORDER_PATTERN =
+  /\b(?:largest|smallest|greater|least|greatest|compare|comparison|ascending|descending)\b/i;
+const NUMBER_CONSTRUCTION_PATTERN =
+  /\b(?:\d+\s*-?\s*digit\s+number|digit\s+number|number\s+with|with\s+\d+\s+in\s+(?:the\s+)?(?:ones?|tens?|hundreds?|thousands?|ten\s+thousands?|lakhs?|ten\s+lakhs?|crores?)\s+place)\b/i;
+const PHYSICS_STUDY_PATTERN =
+  /\b(?:physics|laws?|formula|formulas|numerical\s+problems?|theory\s+concepts?|force|motion|speed|velocity|acceleration|energy|power|work|current|voltage|resistance|ohm'?s\s+law|newton'?s\s+laws?|magnetism|reflection|refraction|lens|mirror|waves?|sound|light)\b/i;
+const CHEMISTRY_STUDY_PATTERN =
+  /\b(?:chemistry|chemical\s+concepts?|formulas?|reactions?|definitions?|calculations?|acid|base|salt|solution|mixture|moles?|molarity|atoms?|molecules?|elements?|compounds?|periodic\s+table|valency|oxidation|reduction|chemical\s+equation)\b/i;
+const ACCOUNTS_STUDY_PATTERN =
+  /\b(?:accounts?|accountancy|journal|ledger|debit|credit|accounting\s+concepts?|calculations?|trial\s+balance|balance\s+sheet|cash\s+book|assets?|liabilities|capital|revenue|expense|depreciation|goodwill)\b/i;
+const COMMERCE_STUDY_PATTERN =
+  /\b(?:commerce|business\s+(?:concepts?|studies)|economics\s+concepts?|commerce\s+theory|demand|supply|market|trade|consumer|producer|partnership|shares?|debentures?|gst|stock|inventory)\b/i;
+const SUBJECT_BASED_STUDY_PATTERN = new RegExp(
+  [
+    MATHS_STUDY_PATTERN.source,
+    PHYSICS_STUDY_PATTERN.source,
+    CHEMISTRY_STUDY_PATTERN.source,
+    ACCOUNTS_STUDY_PATTERN.source,
+    COMMERCE_STUDY_PATTERN.source,
+  ].join("|"),
+  "i"
+);
+const STUDY_STATEMENT_PATTERN =
+  /\b(?:is|are|was|were|means|refers|called|known|equals?|separate|separates|groups?|according\s+to|formula\s+for|definition\s+of)\b/i;
+
+const isSubjectBasedStudyQuestion = (question) => {
+  const text = String(question || "").trim();
+  if (!text) return false;
+
+  const hasSubjectSignal = SUBJECT_BASED_STUDY_PATTERN.test(text);
+  if (!hasSubjectSignal) return false;
+
+  const isOnlyPersonalChat = PERSONAL_CHAT_PATTERN.test(text) && !STUDY_QUESTION_INTENT_PATTERN.test(text);
+  if (isOnlyPersonalChat) return false;
+
+  const hasStudyIntent = STUDY_QUESTION_INTENT_PATTERN.test(text);
+  const hasNumberStudySignal =
+    /\d/.test(text) && (MATHS_STUDY_PATTERN.test(text) || INDIAN_GROUPED_NUMBER_PATTERN.test(text));
+  const hasSubjectStatement = STUDY_STATEMENT_PATTERN.test(text);
+
+  return hasStudyIntent || hasNumberStudySignal || hasSubjectStatement;
+};
+
+const countNumericTokens = (text) => (String(text || "").match(/\d[\d,]*/g) || []).length;
+
+const isMathsFormattingQuestion = (question) => {
+  const text = String(question || "").trim();
+  if (!text || /\bindian\s+numbering\s+system\b/i.test(text)) return false;
+  return /\d/.test(text) && INTERNATIONAL_FORMATTING_PATTERN.test(text);
+};
+
+const isMathsReasoningQuestion = (question) => {
+  const text = String(question || "").trim();
+  if (!text) return false;
+
+  const numericCount = countNumericTokens(text);
+  const hasMathSignal =
+    MATHS_STUDY_PATTERN.test(text) ||
+    INDIAN_GROUPED_NUMBER_PATTERN.test(text) ||
+    NUMBER_CONSTRUCTION_PATTERN.test(text) ||
+    (numericCount >= 2 && NUMERIC_COMPARISON_OR_ORDER_PATTERN.test(text));
+  const hasReasoningSignal =
+    MATHS_REASONING_PATTERN.test(text) ||
+    (/\b(?:which\s+one|which)\b/i.test(text) && /\b(?:largest|smallest|greater|least|greatest)\b/i.test(text));
+
+  return hasMathSignal && hasReasoningSignal && (numericCount >= 1 || NUMBER_CONSTRUCTION_PATTERN.test(text));
+};
+
+const normalizeSupportedSubject = (subject) => {
+  const normalized = String(subject || "").trim().toLowerCase();
+  if (normalized === "maths" || normalized === "math") return "Maths";
+  if (normalized === "physics") return "Physics";
+  if (normalized === "chemistry") return "Chemistry";
+  return null;
+};
+
+const buildSubjectRoutingText = (question, subject) => {
+  const text = String(question || "").trim();
+  const supportedSubject = normalizeSupportedSubject(subject);
+  return supportedSubject ? `${text} ${supportedSubject}` : text;
+};
+
+export const detectDirectGeminiTextRoute = (question, subject) => {
+  const supportedSubject = normalizeSupportedSubject(subject);
+  const classificationQuestion = buildSubjectRoutingText(question, supportedSubject);
+  const educationalFillInBlank = isEducationalFillInBlankQuestion(classificationQuestion);
+
+  if (supportedSubject === "Maths" && isMathsReasoningQuestion(classificationQuestion)) {
+    return "maths_reasoning";
+  }
+
+  if (
+    !supportedSubject &&
+    !/\d/.test(String(question || "")) &&
+    /\b(?:arrange|order)\b/i.test(String(question || "")) &&
+    /\bnumbers?\b/i.test(String(question || ""))
+  ) {
+    return null;
+  }
+
+  if (isEquationBasedQuestion(classificationQuestion) && !educationalFillInBlank) {
+    return "equation_calculation";
+  }
+
+  if (isMathsReasoningQuestion(classificationQuestion)) {
+    return "maths_reasoning";
+  }
+
+  // Subject-based study questions bypass RAG because the answer may require
+  // reasoning and may not exist inside retrieved chunks.
+  if (isSubjectBasedStudyQuestion(classificationQuestion)) {
+    return "subject_study_question";
+  }
+
+  if (educationalFillInBlank) {
+    return "academic_fill_in_blank";
+  }
+
+  if (isMathsFormattingQuestion(classificationQuestion)) {
+    return "maths_formatting";
+  }
+
+  return null;
+};
+
+export const selectDirectGeminiTextRoute = ({ question, subject, hasBookScope = false }) => {
+  const supportedSubject = normalizeSupportedSubject(subject);
+  const detectedRoute = detectDirectGeminiTextRoute(question, supportedSubject);
+
+  if (!hasBookScope || supportedSubject || detectedRoute === "maths_reasoning") {
+    return detectedRoute;
+  }
+
+  return null;
+};
+
 const normalizeFollowUpComparable = (value) =>
   String(value || "")
     .toLowerCase()
@@ -566,6 +718,8 @@ export const askQuestion = asyncHandler(async (req, res) => {
   const payload = req.method === "GET" ? req.query : req.body;
   const {
     question,
+    query,
+    subject,
     classLevel,
     language,
     preferredLanguage,
@@ -583,6 +737,7 @@ export const askQuestion = asyncHandler(async (req, res) => {
     book,
     chapter,
   } = payload;
+  const requestQuestion = question || query;
   const voice = req.query.voice === "true";
   const headerLanguage = req.headers["x-chat-language"];
   const queryLanguage = req.query.lang;
@@ -598,7 +753,7 @@ export const askQuestion = asyncHandler(async (req, res) => {
         mimeType: uploadedFile.normalizedMimeType || uploadedFile.mimetype,
       }
     : parseImageDataPayload(payload);
-  const cleanedQuestion = question ? stripLanguageTag(question) : "";
+  const cleanedQuestion = requestQuestion ? stripLanguageTag(requestQuestion) : "";
 
   if (imageInput) {
     try {
@@ -622,11 +777,16 @@ export const askQuestion = asyncHandler(async (req, res) => {
     }
   }
 
-  if (!question) {
+  if (!requestQuestion) {
     return res.status(400).json({ message: "Question is required" });
   }
 
-  const taggedLanguage = extractTaggedLanguage(question);
+  const supportedSubject = normalizeSupportedSubject(subject);
+  const subjectAwareGeminiRoute = detectDirectGeminiTextRoute(
+    cleanedQuestion,
+    supportedSubject
+  );
+  const taggedLanguage = extractTaggedLanguage(requestQuestion);
   let searchQuestion = stripLanguageInstructionForSearch(cleanedQuestion);
   const scopedBook =
     sourcePath ||
@@ -666,16 +826,42 @@ export const askQuestion = asyncHandler(async (req, res) => {
   }
 
   let result;
+  const directGeminiTextRoute = selectDirectGeminiTextRoute({
+    question: cleanedQuestion,
+    subject: supportedSubject,
+    hasBookScope: Boolean(scopedBook),
+  });
+  // Keep the early classification authoritative when subject context was supplied.
+  const resolvedGeminiTextRoute = supportedSubject
+    ? subjectAwareGeminiRoute
+    : directGeminiTextRoute;
   try {
-    result = await routeRagQuestion({
-      question: searchQuestion || cleanedQuestion,
-      originalQuestion: cleanedQuestion,
-      preferPreciseAnswer,
-      previousAnswer: previousRagLog?.ai_response || null,
-      classLevel: effectiveClassLevel,
-      bookScope: scopedBook,
-      userId: req.user.id,
-    });
+    if (resolvedGeminiTextRoute) {
+      const answer = await solveWithGeminiFromTextbook({
+        question: cleanedQuestion,
+        routingText: buildSubjectRoutingText(cleanedQuestion, supportedSubject),
+        chunks: [],
+        metadatas: [],
+      });
+
+      result = {
+        answer,
+        sources: [],
+        source_type: "gemini",
+        answer_source: "gemini_solver",
+        filters_used: `${resolvedGeminiTextRoute}_gemini_solver`,
+      };
+    } else {
+      result = await routeRagQuestion({
+        question: searchQuestion || cleanedQuestion,
+        originalQuestion: cleanedQuestion,
+        preferPreciseAnswer,
+        previousAnswer: previousRagLog?.ai_response || null,
+        classLevel: effectiveClassLevel,
+        bookScope: scopedBook,
+        userId: req.user.id,
+      });
+    }
   } catch (err) {
     console.error("RAG ask failed:", err?.message || err);
     result = {

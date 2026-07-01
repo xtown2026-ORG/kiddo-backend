@@ -72,6 +72,10 @@ const GENERAL_ACADEMIC_SUBJECT_QUESTION_PATTERN =
   /\b(what\s+is|what\s+are|why|how|define|explain|describe|differentiate|distinguish|state|list|journal(?:ise|ize)?|journal\s+entry|pass\s+journal\s+entries|record|prepare|debit|credit|ledger|trial\s+balance|balance\s+sheet|goodwill|business|commerce|demand|supply|market)\b/i;
 const SUBJECT_THEORY_HINT_PATTERN =
   /\b(algebra|geometry|triangle|circle|quadrilateral|polynomial|quadratic|factorisation|inequality|equation|theorem|coordinate\s+geometry|arithmetic\s+progression|probability|statistics|mean|median|mode|set|sets|subset|superset|union|intersection|venn|sin|cos|tan|cot|sec|cosec|trigonometric|identity|log|ln|ohm'?s\s+law|newton'?s\s+laws?|work|energy|power|force|motion|speed|velocity|acceleration|current|voltage|resistance|magnetism|reflection|refraction|lens|mirror|wave|sound|light|photoelectric|atom|molecule|element|compound|mixture|valency|electron|proton|neutron|acid|base|salt|ph|periodic\s+table|chemical\s+bond|oxidation|reduction|molarity|mole\s+concept|journal|ledger|trial\s+balance|balance\s+sheet|debit|credit|capital|liability|asset|revenue|expense|depreciation|interest|discount|profit|loss|business|trade|commerce|market|demand|supply|consumer|producer|goodwill|partnership|shares?|debentures?|gst|inventory|stock|cash\s+book|bills?\s+of\s+exchange)\b/i;
+const FILL_IN_THE_BLANK_PATTERN =
+  /(?:_{2,}|\.{3,}|-{3,}|…|\bfill\s+in\s+the\s+blanks?\b|\bfill\s+the\s+blanks?\b|\bfill\s+up\s+the\s+blanks?\b|\bcomplete\s+the\s+(?:sentence|statement)s?\b)/i;
+const ACADEMIC_FILL_BLANK_HINT_PATTERN =
+  /\b(school|study|student|class|grade|lesson|chapter|homework|worksheet|textbook|exam|test|quiz|math|maths|mathematics|number|numbers|digit|digits|place\s+value|expanded\s+form|smallest|largest|successor|predecessor|fraction|decimal|multiple|factor|prime|composite|capital|country|state|city|continent|ocean|river|mountain|planet|solar\s+system|earth|moon|sun|photosynthesis|plant|plants|cell|cells|organ|organism|human\s+body|animal|animals|science|physics|chemistry|biology|history|geography|civics|grammar|noun|pronoun|verb|adjective|adverb|preposition|conjunction|sentence|synonym|antonym|tense|article|singular|plural|subject|predicate)\b/i;
 
 const STRICT_DERIVATION_PROMPT = `
 You are a strict mathematical derivation engine.
@@ -357,6 +361,34 @@ const looksLikeTheorySubjectQuestion = (question) => {
   return false;
 };
 
+export const isEducationalFillInBlankQuestion = (question) => {
+  const exactText = String(question || "").trim();
+  const text = normalizeQuestionForSolver(exactText);
+  if (!exactText || !text) return false;
+
+  if (!FILL_IN_THE_BLANK_PATTERN.test(exactText)) {
+    return false;
+  }
+
+  const hasAcademicHint =
+    ACADEMIC_FILL_BLANK_HINT_PATTERN.test(exactText) ||
+    DIRECT_GEMINI_SUBJECT_PATTERN.test(exactText) ||
+    SUBJECT_THEORY_HINT_PATTERN.test(exactText);
+  if (!hasAcademicHint) {
+    return false;
+  }
+
+  const asksForLongExplanation =
+    /\b(explain|describe|discuss|essay|write\s+(?:a\s+)?note|why|how)\b/i.test(text);
+  if (asksForLongExplanation) {
+    return false;
+  }
+
+  return /\b(is|are|was|were|occurs?|happens?|called|known|means|refers|equals?|has|have|formed|located|found|made)\b/i.test(
+    text
+  );
+};
+
 const shouldForceDirectGeminiSolve = (question) => {
   const text = normalizeQuestionForSolver(question);
   if (!text) return false;
@@ -410,6 +442,7 @@ export const isEquationBasedQuestion = (question) => {
   }
 
   return (
+    isEducationalFillInBlankQuestion(exactText) ||
     looksLikeTheorySubjectQuestion(text) ||
     shouldForceDirectGeminiSolve(text) ||
     EQUATION_QUESTION_PATTERNS.some((pattern) => pattern.test(text)) ||
@@ -435,9 +468,155 @@ const buildBasicStemAnswer = ({ formula, given, substitution, calculation, final
     `Final Answer: ${finalAnswer || "unit not specified"}`,
   ].join("\n");
 
+const INDIAN_PLACE_NAMES = [
+  "ones",
+  "tens",
+  "hundreds",
+  "thousands",
+  "ten thousands",
+  "lakhs",
+  "ten lakhs",
+  "crores",
+  "ten crores",
+  "hundred crores",
+];
+
+const formatIndianNumber = (value) => {
+  const numericText = String(Math.trunc(Math.abs(Number(value) || 0)));
+  if (numericText.length <= 4) return numericText;
+
+  const lastThree = numericText.slice(-3);
+  const prefix = numericText.slice(0, -3);
+  const groupedPrefix = prefix.replace(/\B(?=(\d{2})+(?!\d))/g, ",");
+  return `${groupedPrefix},${lastThree}`;
+};
+
+const formatInternationalNumber = (digits) => {
+  const normalized = String(digits || "")
+    .replace(/\D/g, "")
+    .replace(/^0+(?=\d)/, "");
+  if (!normalized) return null;
+  return normalized.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+};
+
+const isInternationalNumberFormattingQuestion = (text) => {
+  const normalized = String(text || "").toLowerCase();
+  if (/\bindian\s+numbering\s+system\b/.test(normalized)) return false;
+
+  return (
+    /\binternational\s+(?:system|numbering\s+system)\b/.test(normalized) ||
+    /\bstandard\s+(?:numeral|number)\s+grouping\b/.test(normalized) ||
+    /\bstandard\s+(?:numeral|number)\s+format(?:ting)?\b/.test(normalized) ||
+    /\bplace\s+value\s+format(?:ting)?\b/.test(normalized) ||
+    /\b(?:use|insert|put|place)\s+commas?\b/.test(normalized) ||
+    /\bwrite\b.+\b(?:with|using)\s+commas?\b/.test(normalized)
+  );
+};
+
+const extractNumberForFormattingQuestion = (text) => {
+  const candidates = String(text || "").match(/\d[\d,]*/g) || [];
+  const usable = candidates
+    .map((candidate) => ({
+      raw: candidate,
+      digits: candidate.replace(/,/g, ""),
+      hasComma: candidate.includes(","),
+    }))
+    .filter((candidate) => /^\d+$/.test(candidate.digits))
+    .filter((candidate) => candidate.digits.length > 1);
+
+  if (!usable.length) return null;
+
+  usable.sort((a, b) => {
+    if (b.digits.length !== a.digits.length) return b.digits.length - a.digits.length;
+    if (a.hasComma !== b.hasComma) return a.hasComma ? -1 : 1;
+    return 0;
+  });
+
+  return usable[0].digits;
+};
+
+const solveInternationalNumberFormattingQuestion = (question) => {
+  const text = normalizeQuestionForSolver(question);
+  if (!text || !isInternationalNumberFormattingQuestion(text)) return null;
+
+  const digits = extractNumberForFormattingQuestion(text);
+  if (!digits) return null;
+
+  return formatInternationalNumber(digits);
+};
+
+const extractTargetDigitForPlaceQuestion = (text) => {
+  const normalized = String(text || "");
+  const targetPatterns = [
+    /\b(?:place|face)\s+value\s+of\s+([0-9])\b/i,
+    /\b(?:place|face)\s+value\s+(?:for|of\s+the\s+digit)\s+([0-9])\b/i,
+    /\bdigit\s+([0-9])\b/i,
+  ];
+
+  for (const pattern of targetPatterns) {
+    const match = normalized.match(pattern);
+    if (match?.[1]) return match[1];
+  }
+
+  return null;
+};
+
+const extractNumberForPlaceQuestion = (text, targetDigit) => {
+  const candidates = String(text || "").match(/\d[\d,]*/g) || [];
+  const usable = candidates
+    .map((candidate) => ({
+      raw: candidate,
+      digits: candidate.replace(/,/g, ""),
+      hasComma: candidate.includes(","),
+    }))
+    .filter((candidate) => /^\d+$/.test(candidate.digits))
+    .filter((candidate) => candidate.digits.length > 1 || candidate.digits !== targetDigit);
+
+  if (!usable.length) return null;
+
+  usable.sort((a, b) => {
+    if (a.hasComma !== b.hasComma) return a.hasComma ? -1 : 1;
+    return b.digits.length - a.digits.length;
+  });
+
+  return usable[0].digits;
+};
+
+const solvePlaceOrFaceValueQuestion = (question) => {
+  const text = normalizeQuestionForSolver(question);
+  if (!text || !/\b(?:place|face)\s+value\b/i.test(text)) return null;
+
+  const targetDigit = extractTargetDigitForPlaceQuestion(text);
+  const numberDigits = extractNumberForPlaceQuestion(text, targetDigit);
+  if (!targetDigit || !numberDigits) return null;
+
+  if (/\bface\s+value\b/i.test(text)) {
+    return `Final Answer: ${targetDigit}`;
+  }
+
+  const digitIndex = numberDigits.indexOf(targetDigit);
+  if (digitIndex < 0) return null;
+
+  const placesFromRight = numberDigits.length - digitIndex - 1;
+  const placeValue = Number(targetDigit) * 10 ** placesFromRight;
+  if (!Number.isSafeInteger(placeValue)) return null;
+
+  const placeName = INDIAN_PLACE_NAMES[placesFromRight];
+  const formattedPlaceValue = formatIndianNumber(placeValue);
+
+  return [
+    placeName ? `The digit ${targetDigit} is in the ${placeName} place.` : "",
+    `Final Answer: ${formattedPlaceValue}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+};
+
 const solveDirectArithmeticQuestion = (question) => {
   const text = String(question || "").trim();
   if (!text) return null;
+  if (/\b(?:place|face)\s+value\b/i.test(text)) return null;
+  if (isInternationalNumberFormattingQuestion(text)) return null;
 
   const match = text.match(/([0-9][0-9+\-*/().\s]+[0-9)])\s*=?\s*\??$/);
   if (!match) return null;
@@ -2752,6 +2931,8 @@ const solveFixedPrefixArrangementQuestion = (question) => {
 };
 
 const solveQuestionLocally = (question) =>
+  solveInternationalNumberFormattingQuestion(question) ||
+  solvePlaceOrFaceValueQuestion(question) ||
   solveArithmeticEqualityQuestion(question) ||
   solveDirectArithmeticQuestion(question) ||
   solveFactorialQuestion(question) ||
@@ -2894,6 +3075,19 @@ Answering rules:
 11. Do not force a rigid template like Formula/Given/Substitution unless it is naturally useful.
 12. Do not include code fences or unnecessary meta-commentary.
 
+School study question formatting:
+- For simple school fill-in-the-blank questions, give the expected textbook-style answer directly. Do not add unnecessary steps.
+- If the question asks to write a number in the International System, use commas, place-value formatting, or standard numeral grouping, only convert the number by inserting commas every 3 digits from right to left. Do not perform arithmetic, do not repeat the unformatted input, and return only the correctly formatted number with no label, formula, calculation, or explanation.
+- For expanded form questions, remove zero-value place terms. Do not write terms like 0 x 1,000, 0 x 10, + 0, or any other zero-place contribution.
+- For Indian-number-system expanded forms, use Indian place-value grouping when helpful. Example: 76,70,905 = 70,00,000 + 6,00,000 + 70,000 + 900 + 5.
+- For smallest/largest digit-number and place-value questions, keep the answer short and end with only the required value.
+- For place value questions, first identify the requested digit, then use the whole given number. Do not answer using only the last comma-separated group.
+- For Indian numbering system place value, count places from right to left as Ones, Tens, Hundreds, Thousands, Ten Thousands, Lakhs, Ten Lakhs, Crores.
+- For "place value of 7 in 56,74,56,345", the digit 7 is in the ten lakhs place, so the final answer is 70,00,000.
+- For face value questions, the final answer is the digit itself.
+- Do not use Formula/Given/Substitution/Calculation format for place value or face value questions.
+- Keep school subject answers short, clear, and suitable for students.
+
 Readability rules:
 - Keep the same answer, steps, calculations, reasoning, and final result.
 - Use simple Grade 6 level words in explanations.
@@ -2991,7 +3185,7 @@ const buildGenericSubjectGeminiPrompt = ({ question, contextText }) =>
   });
 
 const IMAGE_QUESTION_SOLVER_PROMPT =
-  "You are an expert academic problem solver. Read the uploaded image carefully. The image may contain maths, physics, chemistry, accounts, commerce, table, graph, diagram, equation, or numerical problem. Answer the exact given question. Preserve all mathematical functions, scientific notation, accounting structures, tables, chemistry equations, diagrams, and subject-specific symbols. Do not rewrite the question into a different simpler equation. Solve according to the actual subject context. Generate accurate step-by-step answers and final answers. Use simple Grade 6 level words in explanations while keeping the same steps, calculations, reasoning, and final result. Prefer common words such as Check instead of Determine, Find instead of Calculate, Much less instead of Significantly less, and Give a reason instead of Provide reasoning. For equation, numerical, formula-based, percentage, fraction, geometry, coordinate, or calculus solving, format every mathematical step as Step N, then the equation/formula/calculation, then Explanation:, followed by one short student-friendly line explaining only that step's operation. Do not use the dollar sign character anywhere in equations, expressions, explanations, formatted output, or final answers. Do not wrap math in dollar signs; write equations as plain readable text. Do not add long explanations, theory paragraphs, unrelated examples, or textbook-style notes. If the image is unclear, say what part is unclear instead of guessing.";
+  "You are an expert academic problem solver. Read the uploaded image carefully. The image may contain maths, physics, chemistry, accounts, commerce, table, graph, diagram, equation, or numerical problem. Answer the exact given question. Preserve all mathematical functions, scientific notation, accounting structures, tables, chemistry equations, diagrams, and subject-specific symbols. Do not rewrite the question into a different simpler equation. Solve according to the actual subject context. Generate accurate step-by-step answers and final answers. Use simple Grade 6 level words in explanations while keeping the same steps, calculations, reasoning, and final result. For simple school fill-in-the-blank questions, give the expected textbook-style answer directly without unnecessary steps. If the question asks to write a number in the International System, use commas, place-value formatting, or standard numeral grouping, only convert the number by inserting commas every 3 digits from right to left. Do not perform arithmetic, do not repeat the unformatted input, and return only the correctly formatted number with no label, formula, calculation, or explanation. For expanded form questions, remove zero-value place terms and do not write terms like 0 x 1,000, 0 x 10, + 0, or any other zero-place contribution. For Indian-number-system expanded forms, use Indian place-value grouping when helpful, such as 76,70,905 = 70,00,000 + 6,00,000 + 70,000 + 900 + 5. For place value questions, first identify the requested digit, then use the whole given number. Do not answer using only the last comma-separated group. Count Indian numbering places from right to left as Ones, Tens, Hundreds, Thousands, Ten Thousands, Lakhs, Ten Lakhs, Crores. For place value of 7 in 56,74,56,345, the final answer is 70,00,000. For face value questions, the final answer is the digit itself. Do not use Formula/Given/Substitution/Calculation format for place value or face value questions. For smallest/largest digit-number and place-value questions, keep the answer short and end with only the required value. Prefer common words such as Check instead of Determine, Find instead of Calculate, Much less instead of Significantly less, and Give a reason instead of Provide reasoning. For equation, numerical, formula-based, percentage, fraction, geometry, coordinate, or calculus solving, format every mathematical step as Step N, then the equation/formula/calculation, then Explanation:, followed by one short student-friendly line explaining only that step's operation. Do not use the dollar sign character anywhere in equations, expressions, explanations, formatted output, or final answers. Do not wrap math in dollar signs; write equations as plain readable text. Do not add long explanations, theory paragraphs, unrelated examples, or textbook-style notes. If the image is unclear, say what part is unclear instead of guessing.";
 
 const extractGeminiText = (result) => {
   const text = typeof result?.text === "function" ? result.text() : result?.text;
@@ -3027,19 +3221,32 @@ const runGeminiPrompt = async (prompt, models = GEMINI_SOLVER_MODELS) => {
   return "";
 };
 
-export async function solveWithGeminiFromTextbook({ question, chunks = [], metadatas = [] }) {
+export const isAcademicSubjectRoute = ({ question, routingText }) => {
+  const classifierQuestion = String(routingText || question || "").trim();
+  const classifierLocalQuestion = normalizeQuestionForSolver(classifierQuestion);
+
+  return (
+    isEquationBasedQuestion(classifierQuestion) ||
+    looksLikeTheorySubjectQuestion(classifierLocalQuestion) ||
+    DIRECT_GEMINI_SUBJECT_PATTERN.test(classifierQuestion) ||
+    SUBJECT_THEORY_HINT_PATTERN.test(classifierQuestion) ||
+    GENERAL_ACADEMIC_SUBJECT_QUESTION_PATTERN.test(classifierQuestion)
+  );
+};
+
+export async function solveWithGeminiFromTextbook({
+  question,
+  routingText,
+  chunks = [],
+  metadatas = [],
+}) {
   console.log("GEMINI_SOLVER_ROUTE_HIT");
   console.log("GEMINI_SOLVER_TEXT_REQUEST");
   const solverQuestion = String(question || "").trim();
   const localQuestion = normalizeQuestionForSolver(question);
   const contextText = formatContextBlock({ chunks, metadatas }).trim() || "No relevant textbook context retrieved.";
   const localAnswer = solveQuestionLocally(localQuestion);
-  const isAcademicSubjectQuestion =
-    isEquationBasedQuestion(solverQuestion) ||
-    looksLikeTheorySubjectQuestion(localQuestion) ||
-    DIRECT_GEMINI_SUBJECT_PATTERN.test(solverQuestion) ||
-    SUBJECT_THEORY_HINT_PATTERN.test(solverQuestion) ||
-    GENERAL_ACADEMIC_SUBJECT_QUESTION_PATTERN.test(solverQuestion);
+  const isAcademicSubjectQuestion = isAcademicSubjectRoute({ question: solverQuestion, routingText });
 
   if (!isAcademicSubjectQuestion) {
     return localAnswer || STEM_NO_ANSWER_TEXT;
