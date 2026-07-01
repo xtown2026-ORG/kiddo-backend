@@ -133,7 +133,7 @@ export const getMyProfile = async (req, res, next) => {
       order: [["created_at", "ASC"]],
     });
     const rawParentLinks = parentLinks.map((link) => link.toJSON());
-    const approvalStatus = "approved";
+    const approvalStatus = rawParentLinks.length > 0 ? rawParentLinks[0].approval_status : "pending";
 
     const links = await listApprovedParentLinks({
       parent_user_id: req.user.id,

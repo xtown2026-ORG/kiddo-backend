@@ -6,6 +6,7 @@ import {
   updateSchoolStatusService,
   updateSchoolAdminStatusService,
   resetSchoolAdminPasswordService,
+  updateSchoolBrandingService,
 } from "./school.service.js";
 
 /* CREATE SCHOOL */
@@ -60,5 +61,51 @@ export const getSchoolDetails = asyncHandler(async (req, res) => {
   res.json({
     success: true,
     data: school,
+  });
+});
+
+/* UPDATE SCHOOL BRANDING */
+export const updateSchoolBranding = asyncHandler(async (req, res) => {
+  const school_id = req.user.school_id;
+  if (!school_id) {
+    return res.status(403).json({ message: "Forbidden: No school context" });
+  }
+
+  const school_name = req.body.school_name;
+  if (school_name && !/^[A-Za-z\s]+$/.test(school_name)) {
+    return res.status(400).json({ message: "School name can contain only letters and spaces." });
+  }
+
+  const school = await updateSchoolBrandingService({
+    school_id,
+    school_name,
+    logo_file: req.files && req.files.length > 0 ? req.files[0] : null,
+  });
+
+  res.json({
+    success: true,
+    message: "School branding updated successfully",
+    data: school,
+  });
+});
+
+/* GET MY SCHOOL BRANDING */
+export const getMySchoolBranding = asyncHandler(async (req, res) => {
+  const school_id = req.user?.school_id;
+  if (!school_id) {
+    return res.status(403).json({ message: "No school associated with this user." });
+  }
+
+  const school = await getSchoolDetailsService(school_id);
+  if (!school) {
+    return res.status(404).json({ message: "School not found." });
+  }
+
+  res.json({
+    success: true,
+    data: {
+      school_name: school.school_name,
+      logo_url: school.logo_url
+    },
   });
 });

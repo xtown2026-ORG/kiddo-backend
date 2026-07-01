@@ -2,6 +2,13 @@ import School from "./school.model.js";
 import User from "../users/user.model.js";
 import AppError from "../../shared/appError.js";
 import { getPagination } from "../../shared/utils/pagination.js";
+import fs from "fs";
+import path from "path";
+
+export const SCHOOLS_UPLOAD_DIR = path.join(process.cwd(), "uploads", "schools");
+if (!fs.existsSync(SCHOOLS_UPLOAD_DIR)) {
+  fs.mkdirSync(SCHOOLS_UPLOAD_DIR, { recursive: true });
+}
 
 /* =========================
    SUPER ADMIN: CREATE SCHOOL
@@ -197,6 +204,38 @@ export const getSchoolDetailsService = async ({ requester, school_id }) => {
   const school = await School.findByPk(requestedId);
   if (!school) {
     throw new AppError("School not found", 404);
+  }
+
+  return school;
+};
+
+/* =========================
+   SCHOOL BRANDING
+========================= */
+export const updateSchoolBrandingService = async ({ school_id, school_name, logo_file }) => {
+  const school = await School.findByPk(school_id);
+  if (!school) {
+    throw new AppError("School not found", 404);
+  }
+
+  const updateData = {};
+  if (school_name) {
+    updateData.school_name = school_name;
+  }
+
+  if (logo_file) {
+    const ext = path.extname(logo_file.originalname) || ".png";
+    const filename = `logo_${school_id}_${Date.now()}${ext}`;
+    const filepath = path.join(SCHOOLS_UPLOAD_DIR, filename);
+
+    fs.writeFileSync(filepath, logo_file.buffer);
+
+    // Provide a relative path for the static server
+    updateData.logo_url = `/uploads/schools/${filename}?v=${Date.now()}`;
+  }
+
+  if (Object.keys(updateData).length > 0) {
+    await school.update(updateData);
   }
 
   return school;

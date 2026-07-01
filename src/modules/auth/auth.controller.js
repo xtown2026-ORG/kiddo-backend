@@ -112,8 +112,9 @@ export const login = asyncHandler(async (req, res) => {
   // }
 
   // school check (except super admin)
+  let school = null;
   if (user.role !== "super_admin") {
-    const school = await School.findByPk(user.school_id);
+    school = await School.findByPk(user.school_id);
     if (!school || school.status !== "active") {
       throw new AppError("School is inactive", 403);
     }
@@ -137,6 +138,12 @@ export const login = asyncHandler(async (req, res) => {
         student_id: student.id
       };
     }
+  }
+
+  // Embed school branding
+  if (school) {
+    additionalClaims.school_name = school.school_name;
+    additionalClaims.school_logo_url = school.logo_url;
   }
 
   const token = jwt.sign(

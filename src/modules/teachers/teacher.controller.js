@@ -212,7 +212,7 @@ export const getMyProfile = asyncHandler(async (req, res) => {
   res.json({
     ...data,
     ...user,
-    approval_status: "approved",
+    approval_status: data.approval_status,
     avatar_url: user.avatar_url || "",
   });
 });
