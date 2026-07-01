@@ -92,14 +92,37 @@ export const listHomeworkService = async ({
   created_date,
   query,
 }) => {
-  const { limit, offset } = getPagination(query);
+  let { limit, offset } = getPagination(query);
 
   const where = { school_id };
-  if (date) where.homework_date = date;
+  const andConditions = [];
+
+  let isActiveHomeworkMode = false;
+  const todayStr = new Date().toISOString().split("T")[0];
+
+  if (date) {
+    if (date === todayStr) {
+      isActiveHomeworkMode = true;
+      limit = 100; // Fetch more to ensure deduplication has enough pool
+      andConditions.push({
+        due_date: {
+          [Op.gte]: todayStr
+        }
+      });
+    } else {
+      andConditions.push({
+        [Op.or]: [
+          { homework_date: date },
+          { due_date: date }
+        ]
+      });
+    }
+  }
+
   if (created_date) {
     const start = new Date(`${created_date}T00:00:00`);
     const end = new Date(`${created_date}T23:59:59.999`);
-    where.created_at = { [Op.between]: [start, end] };
+    andConditions.push({ created_at: { [Op.between]: [start, end] } });
   }
 
   let isStudentOrParent = false;
@@ -191,12 +214,16 @@ export const listHomeworkService = async ({
       if (!orConditions.length) {
         return { count: 0, rows: [] };
       }
-      where[Op.or] = orConditions;
+      andConditions.push({ [Op.or]: orConditions });
     }
   } else {
     // school_admin / super_admin: allow optional filters
     if (class_id) where.class_id = class_id;
     if (section_id) where.section_id = section_id;
+  }
+
+  if (andConditions.length > 0) {
+    where[Op.and] = andConditions;
   }
 
   // Include models based on role
@@ -233,7 +260,7 @@ export const listHomeworkService = async ({
     ];
   }
 
-  return Homework.findAndCountAll({
+  let result = await Homework.findAndCountAll({
     where,
     include: includeModels,
     order: [["homework_date", "DESC"], ["created_at", "DESC"]],
@@ -241,6 +268,35 @@ export const listHomeworkService = async ({
     offset,
     distinct: true, // Needed when using hasMany inside findAndCountAll
   });
+
+  if (isActiveHomeworkMode) {
+    const latestMap = new Map();
+    const finalRows = [];
+    
+    for (const item of result.rows) {
+      const key = `${item.class_id}_${item.section_id}_${item.subject_id || 'no_sub'}`;
+      
+      if (item.homework_date === todayStr) {
+        // Always show all homework created today
+        finalRows.push(item);
+        // Mark this subject as having an active assignment so older ones are ignored
+        if (!latestMap.has(key)) {
+          latestMap.set(key, true);
+        }
+      } else {
+        // For past active homework, only keep the latest one per subject
+        if (!latestMap.has(key)) {
+          latestMap.set(key, true);
+          finalRows.push(item);
+        }
+      }
+    }
+    
+    result.rows = finalRows;
+    result.count = finalRows.length;
+  }
+
+  return result;
 };
 
 export const updateHomeworkService = async ({ id, user, ...data }) => {

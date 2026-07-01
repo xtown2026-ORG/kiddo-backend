@@ -184,19 +184,44 @@ export const getTeacherTimetableService = async ({
   teacher_id,
 }) => {
   const teacherIds = Array.isArray(teacher_id) ? teacher_id : [teacher_id];
+
+  // 1. Get classes and sections where this teacher has active assignments
+  const assignments = await TeacherAssignment.findAll({
+    where: {
+      school_id,
+      teacher_id: { [Op.in]: teacherIds.filter(Boolean) },
+      is_active: true,
+    },
+    attributes: ["class_id", "section_id"],
+  });
+
+  const classIds = [...new Set(assignments.map((a) => a.class_id))];
+  const sectionIds = [...new Set(assignments.map((a) => a.section_id))];
+
+  if (!classIds.length || !sectionIds.length) {
+    return {};
+  }
+
+  // 2. Fetch all timetable entries for these classes/sections
   const rows = await Timetable.findAll({
+    where: {
+      school_id,
+      class_id: { [Op.in]: classIds },
+      section_id: { [Op.in]: sectionIds },
+    },
     include: [
       {
         model: TeacherAssignment,
-        where: {
-          teacher_id: { [Op.in]: teacherIds.filter(Boolean) },
-          school_id,
-          is_active: true,
-        },
+        required: false,
         include: [
           {
             model: Subject,
             attributes: ["id", "name"],
+          },
+          {
+            model: Teacher,
+            attributes: ["id"],
+            include: [{ model: User, attributes: ["name"] }],
           },
         ],
         attributes: ["id", "teacher_id", "subject_id"],
@@ -216,24 +241,79 @@ export const getTeacherTimetableService = async ({
     ],
   });
 
-  /**
-   * Group by day_of_week
-   */
-  const grouped = {};
+  // Get current local time in Asia/Kolkata for status calculation
+  const timezone = "Asia/Kolkata";
+  const d = new Date();
+  const timeFormatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+  const currentTimeStr = timeFormatter.format(d);
 
+  // Group by day_of_week AND class_id AND section_id to assign sequential period numbers
+  const sectionDayGroups = {};
   for (const row of rows) {
+    const key = `${row.day_of_week}-${row.class_id}-${row.section_id}`;
+    if (!sectionDayGroups[key]) {
+      sectionDayGroups[key] = [];
+    }
+    sectionDayGroups[key].push(row);
+  }
+
+  // Assign period number sequentially
+  const periodNumberMap = new Map(); // maps row.id to "P1", "P2", etc.
+  for (const key in sectionDayGroups) {
+    // Sort by start_time (already sorted by query, but let's be safe)
+    sectionDayGroups[key].sort((a, b) => a.start_time.localeCompare(b.start_time));
+    sectionDayGroups[key].forEach((row, index) => {
+      periodNumberMap.set(row.id, `P${index + 1}`);
+    });
+  }
+
+  // Filter to keep only this teacher's periods and breaks/lunches
+  const filteredRows = rows.filter((row) => {
+    if (row.is_break || !row.teacher_assignment_id) {
+      return true;
+    }
+    const teacherIdInAssignment = row.teacher_assignment?.teacher_id;
+    return teacherIds.map(String).includes(String(teacherIdInAssignment));
+  });
+
+  const grouped = {};
+  for (const row of filteredRows) {
     const day = row.day_of_week;
     if (!grouped[day]) grouped[day] = [];
+
+    // Calculate status: Upcoming, Ongoing, Completed
+    let status = "Upcoming";
+    if (currentTimeStr >= row.start_time && currentTimeStr <= row.end_time) {
+      status = "Ongoing";
+    } else if (currentTimeStr > row.end_time) {
+      status = "Completed";
+    }
 
     grouped[day].push({
       id: row.id,
       start_time: row.start_time,
       end_time: row.end_time,
+      is_break: row.is_break,
+      title: row.is_break ? row.title : null,
+      class_id: row.class_id,
+      section_id: row.section_id,
       class: row.class,
       section: row.section,
+      period_number: periodNumberMap.get(row.id) || "P",
+      status,
       teacher_assignment_id: row.teacher_assignment?.id ?? null,
+      teacher_id: row.teacher_assignment?.teacher_id ?? null,
       subject_id: row.teacher_assignment?.subject_id ?? null,
-      subject: row.teacher_assignment?.subject,
+      subject: row.is_break ? null : row.teacher_assignment?.subject,
+      teacher: row.teacher_assignment?.teacher?.user
+        ? { id: row.teacher_assignment.teacher.id, name: row.teacher_assignment.teacher.user.name }
+        : null,
     });
   }
 

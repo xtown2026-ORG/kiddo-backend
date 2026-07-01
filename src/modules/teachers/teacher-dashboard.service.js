@@ -11,12 +11,21 @@ import { ensureTokenAccount } from "../tokens/token.service.js";
 import AiChatLog from "../ai-chat-logs/ai-chat-log.model.js";
 import AITestAssignment from "../ai-test-assignments/ai-test-assignment.model.js";
 import AITestSubmission from "../ai-test-assignments/ai-test-submission.model.js";
+import Subject from "../subjects/subject.model.js";
+import { getTeacherTimetableService } from "../timetables/timetable.service.js";
 
-const getToday = () => new Date().toISOString().slice(0, 10);
-const getDayName = () =>
-  new Date()
-    .toLocaleDateString("en-US", { weekday: "long" })
-    .toLowerCase();
+const timezone = "Asia/Kolkata";
+
+const getToday = () => {
+  const d = new Date();
+  const formatter = new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" });
+  return formatter.format(d);
+};
+
+const getDayName = () => {
+  const d = new Date();
+  return d.toLocaleDateString("en-US", { timeZone: timezone, weekday: "long" }).toLowerCase();
+};
 
 const ALLOWED_DAYS = new Set([
   "monday",
@@ -62,19 +71,9 @@ export const getTeacherDashboardService = async ({
       })
     : [];
 
-  /* 2) Timetable (today) */
-  const timetable =
-    classIds.length && ALLOWED_DAYS.has(day)
-      ? await Timetable.findAll({
-          where: {
-            school_id,
-            class_id: classIds,
-            section_id: sectionIds,
-            day_of_week: day,
-          },
-          order: [["start_time", "ASC"]],
-        })
-      : [];
+  /* 2) Timetable (today) - Synchronized with getTeacherTimetableService */
+  const allTimetables = await getTeacherTimetableService({ school_id, teacher_id: teacherIds });
+  const timetable = allTimetables[day] || [];
 
   /* 3) Homework (today) */
   const homework = classIds.length
@@ -127,6 +126,8 @@ export const getTeacherDashboardService = async ({
     })
   );
 
+  const totalPendingHomework = homeworkSummary.reduce((sum, h) => sum + h.pending, 0);
+
   /* 5) Pending report cards */
   const pendingReportCards = classIds.length
     ? await ReportCard.count({
@@ -146,8 +147,8 @@ export const getTeacherDashboardService = async ({
   const usedTotal = await AiChatLog.sum("tokens_used", {
     where: { user_id },
   });
-  const used = usedTotal || 0;
-  const remaining = tokenAccount?.balance ?? 0;
+  const used = Number(usedTotal) || 0;
+  const remaining = Number(tokenAccount?.balance) || 0;
   const total = used + remaining;
 
   const assignedTests = await AITestAssignment.findAll({
@@ -158,7 +159,6 @@ export const getTeacherDashboardService = async ({
     },
     include: [{ model: AITestSubmission, attributes: ["id", "status", "percentage"] }],
     order: [["created_at", "DESC"]],
-    limit: 5,
   });
 
   const allSubmissions = assignedTests.flatMap((item) => item.ai_test_submissions || []);
@@ -177,7 +177,10 @@ export const getTeacherDashboardService = async ({
   return {
     classes,
     timetable,
-    homework_summary: homeworkSummary,
+    homework_summary: {
+      items: homeworkSummary,
+      pending: totalPendingHomework,
+    },
     pending_report_cards: pendingReportCards,
     ai_tokens: { total, used, remaining },
     assigned_tests: {
