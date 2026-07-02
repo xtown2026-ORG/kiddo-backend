@@ -56,6 +56,7 @@ import TokenPolicy from "../modules/tokens/token-policy.model.js";
 
 /* ===================== REPORT CARDS ===================== */
 import Exam from "../modules/report-cards/exam.model.js";
+import ExamTimetable from "../modules/report-cards/exam-timetable.model.js";
 import ReportCard from "../modules/report-cards/report-card.model.js";
 import ReportCardMark from "../modules/report-cards/report-card-mark.model.js";
 
@@ -117,6 +118,10 @@ const initAssociations = () => {
   Exam.belongsTo(School, { foreignKey: "school_id" });
   Exam.belongsTo(Class, { foreignKey: "class_id" });
   Exam.hasMany(ReportCard, { foreignKey: "exam_id" });
+  
+  Exam.hasMany(ExamTimetable, { foreignKey: "exam_id", onDelete: "CASCADE" });
+  ExamTimetable.belongsTo(Exam, { foreignKey: "exam_id" });
+  ExamTimetable.belongsTo(Subject, { foreignKey: "subject_id" });
 
   ReportCard.belongsTo(School, { foreignKey: "school_id" });
   ReportCard.belongsTo(Student, { foreignKey: "student_id" });

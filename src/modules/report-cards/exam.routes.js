@@ -6,11 +6,14 @@ import { allowRoles } from "../../shared/middlewares/role.js";
 import {
   createExamSchema,
   lockExamSchema,
+  createExamTimetableSchema,
 } from "./exam.schema.js";
 import {
   createExam,
   lockExam,
   listExamsByClass,
+  addTimetableEntry,
+  listExamTimetable,
 } from "./exam.controller.js";
 
 const router = express.Router();
@@ -34,5 +37,18 @@ router.post(
 
 /* student/parent/teacher */
 router.get("/", listExamsByClass);
+
+/* Timetable management */
+router.post(
+  "/:id/timetable",
+  allowRoles("teacher", "school_admin"),
+  validate(createExamTimetableSchema),
+  addTimetableEntry
+);
+
+router.get(
+  "/:id/timetable",
+  listExamTimetable
+);
 
 export default router;

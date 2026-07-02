@@ -367,11 +367,55 @@ export const getTeacherStudentReportsService = async ({ user }) => {
       const average = items.length
         ? Math.round(items.reduce((sum, item) => sum + Number(item.marks || 0), 0) / items.length)
         : 0;
+
+      const groupedTopics = Array.from(
+        items.reduce((tmap, item) => {
+          const tkey = item.topic;
+          const tcurrent = tmap.get(tkey) || [];
+          tcurrent.push(item);
+          tmap.set(tkey, tcurrent);
+          return tmap;
+        }, new Map()).entries()
+      ).map(([topicName, topicItems]) => {
+        const attemptCount = topicItems.length;
+        const topicAvg = Math.round(topicItems.reduce((sum, item) => sum + Number(item.marks || 0), 0) / attemptCount);
+        const lastAttemptDate = topicItems.reduce((latest, item) => 
+          new Date(item.date) > new Date(latest) ? item.date : latest
+        , topicItems[0].date);
+
+        let trend = "Stable";
+        if (attemptCount > 1) {
+          const sorted = [...topicItems].sort((a, b) => new Date(a.date) - new Date(b.date));
+          const first = sorted[0].marks;
+          const last = sorted[sorted.length - 1].marks;
+          if (last > first + 5) trend = "Improving";
+          else if (last < first - 5) trend = "Declining";
+        }
+
+        return {
+          topic: topicName,
+          subject,
+          score: topicAvg,
+          attemptCount,
+          lastAttemptDate,
+          trend,
+          aiChatScore: "N/A",
+          classTestScore: "N/A",
+          assignmentScore: "N/A",
+          teacherRecommendation: "",
+          aiRecommendation: topicAvg >= 80 
+            ? "Excellent grasp of this topic. Ready for advanced challenges." 
+            : topicAvg < 50 
+              ? "Needs significant review. Recommend focused practice sessions." 
+              : "Steady progress. Encourage consistent practice.",
+        };
+      });
+
       return {
         subject,
         marks: average,
-        strongTopics: items.flatMap((item) => item.strongTopics || []).slice(0, 4),
-        weakTopics: items.flatMap((item) => item.weakTopics || []).slice(0, 4),
+        strongTopics: groupedTopics.filter(t => t.score >= 80).sort((a, b) => b.score - a.score),
+        weakTopics: groupedTopics.filter(t => t.score < 50).sort((a, b) => a.score - b.score),
       };
     });
 
@@ -389,10 +433,10 @@ export const getTeacherStudentReportsService = async ({ user }) => {
 
     return {
       studentId: Number(student.id),
-      name: student.User?.name || student.User?.username || `Student ${student.id}`,
-      username: student.User?.username || student.admission_no || `STU-${student.id}`,
-      className: student.Class?.class_name || "",
-      sectionName: student.Section?.name || "",
+      name: student.user?.name || student.User?.name || student.user?.username || student.User?.username || `Student ${student.id}`,
+      username: student.user?.username || student.User?.username || student.admission_no || `STU-${student.id}`,
+      className: student.class?.class_name || student.Class?.class_name || "",
+      sectionName: student.section?.name || student.Section?.name || "",
       overallAverage,
       attendancePct,
       subjectSummaries: groupedSubjects,

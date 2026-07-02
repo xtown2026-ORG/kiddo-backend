@@ -7,6 +7,8 @@ import {
   createExamService,
   lockExamService,
   listExamsByClassService,
+  addTimetableEntryService,
+  listExamTimetableService,
 } from "./exam.service.js";
 
 export const createExam = asyncHandler(async (req, res) => {
@@ -69,9 +71,7 @@ export const listExamsByClass = asyncHandler(async (req, res) => {
     }
   }
 
-  if (!class_id) {
-    throw new AppError("CLASS_ID_REQUIRED", 400);
-  }
+  // Remove throw AppError("CLASS_ID_REQUIRED", 400);
 
   const result = await listExamsByClassService({
     school_id,
@@ -83,5 +83,30 @@ export const listExamsByClass = asyncHandler(async (req, res) => {
     success: true,
     total: result.count,
     items: result.rows,
+  });
+});
+
+export const addTimetableEntry = asyncHandler(async (req, res) => {
+  const data = await addTimetableEntryService({
+    exam_id: Number(req.params.id),
+    school_id: req.user.school_id,
+    entries: req.body.entries,
+  });
+
+  res.json({
+    success: true,
+    data,
+  });
+});
+
+export const listExamTimetable = asyncHandler(async (req, res) => {
+  const data = await listExamTimetableService({
+    exam_id: Number(req.params.id),
+    school_id: req.user.school_id,
+  });
+
+  res.json({
+    success: true,
+    data,
   });
 });
