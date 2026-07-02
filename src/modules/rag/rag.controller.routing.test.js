@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+<<<<<<< HEAD
 import {
   detectDirectGeminiTextRoute,
   selectDirectGeminiTextRoute,
@@ -11,6 +12,12 @@ const classifyRoute = (question) =>
   detectDirectGeminiTextRoute(question) ? "GEMINI_SOLVER" : "RAG";
 const classifySubjectRoute = (question, subject) =>
   detectDirectGeminiTextRoute(question, subject) ? "GEMINI_SOLVER" : "RAG";
+=======
+import { detectDirectGeminiTextRoute } from "./rag.controller.js";
+
+const classifyRoute = (question) =>
+  detectDirectGeminiTextRoute(question) ? "GEMINI_SOLVER" : "RAG";
+>>>>>>> 6f072c33 (navigation button fixed for maths,physics,chemistry)
 
 test("math_route_fix_01 routes place-value Indian-numbering questions to Gemini Solver", () => {
   assert.equal(
@@ -58,6 +65,7 @@ test("math_general_reasoning_fix_v2 does not route non-maths ordering prompts to
 test("math_general_reasoning_fix_v2 leaves factual book questions on RAG", () => {
   assert.equal(classifyRoute("Who wrote The Discovery of India?"), "RAG");
 });
+<<<<<<< HEAD
 
 test("subject-aware routing uses Maths context with existing fill-blank detection", () => {
   assert.equal(
@@ -133,3 +141,5 @@ test("subject-aware routing supports Chemistry without affecting unsupported sub
   );
   assert.equal(classifySubjectRoute("State the main idea", "History"), "RAG");
 });
+=======
+>>>>>>> 6f072c33 (navigation button fixed for maths,physics,chemistry)

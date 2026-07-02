@@ -14,6 +14,11 @@ import {
 } from "../../shared/services/voice.service.js";
 import Class from "../classes/classes.model.js";
 import AiChatLog from "../ai-chat-logs/ai-chat-log.model.js";
+import {
+  resolveQuestionSubject,
+  SUBJECT_MISMATCH_RESPONSE,
+  validateQuestionSubject,
+} from "./subjectValidation.js";
 
 const GEMINI_MODEL = (process.env.GEMINI_MODEL || "gemini-2.5-flash-lite").replace(/^models\//, "");
 const ai = process.env.GEMINI_API_KEY
@@ -531,6 +536,7 @@ const isMathsReasoningQuestion = (question) => {
   return hasMathSignal && hasReasoningSignal && (numericCount >= 1 || NUMBER_CONSTRUCTION_PATTERN.test(text));
 };
 
+
 const normalizeSupportedSubject = (subject) => {
   const normalized = String(subject || "").trim().toLowerCase();
   if (normalized === "maths" || normalized === "math") return "Maths";
@@ -719,6 +725,7 @@ export const askQuestion = asyncHandler(async (req, res) => {
   const {
     question,
     query,
+    selectedSubject,
     subject,
     classLevel,
     language,
@@ -737,7 +744,20 @@ export const askQuestion = asyncHandler(async (req, res) => {
     book,
     chapter,
   } = payload;
+
   const requestQuestion = question || query;
+  const resolvedSubject = resolveQuestionSubject({
+    question,
+    selectedSubject,
+    subject,
+  });
+  if (
+    question &&
+    validateQuestionSubject({ question, selectedSubject, subject }).shouldReject
+  ) {
+    return res.status(400).json(SUBJECT_MISMATCH_RESPONSE);
+  }
+
   const voice = req.query.voice === "true";
   const headerLanguage = req.headers["x-chat-language"];
   const queryLanguage = req.query.lang;
@@ -781,11 +801,6 @@ export const askQuestion = asyncHandler(async (req, res) => {
     return res.status(400).json({ message: "Question is required" });
   }
 
-  const supportedSubject = normalizeSupportedSubject(subject);
-  const subjectAwareGeminiRoute = detectDirectGeminiTextRoute(
-    cleanedQuestion,
-    supportedSubject
-  );
   const taggedLanguage = extractTaggedLanguage(requestQuestion);
   let searchQuestion = stripLanguageInstructionForSearch(cleanedQuestion);
   const scopedBook =
@@ -826,20 +841,19 @@ export const askQuestion = asyncHandler(async (req, res) => {
   }
 
   let result;
-  const directGeminiTextRoute = selectDirectGeminiTextRoute({
-    question: cleanedQuestion,
-    subject: supportedSubject,
-    hasBookScope: Boolean(scopedBook),
-  });
-  // Keep the early classification authoritative when subject context was supplied.
-  const resolvedGeminiTextRoute = supportedSubject
-    ? subjectAwareGeminiRoute
-    : directGeminiTextRoute;
+  const detectedGeminiTextRoute = detectDirectGeminiTextRoute(cleanedQuestion);
+  const directGeminiTextRoute = resolvedSubject.source === "selected"
+    ? "selected_subject"
+    : !scopedBook || detectedGeminiTextRoute === "maths_reasoning"
+      ? detectedGeminiTextRoute
+      : null;
   try {
-    if (resolvedGeminiTextRoute) {
+    if (directGeminiTextRoute) {
+      const solverQuestion = resolvedSubject.subject
+        ? `${cleanedQuestion}\nSubject: ${resolvedSubject.subject}`
+        : cleanedQuestion;
       const answer = await solveWithGeminiFromTextbook({
-        question: cleanedQuestion,
-        routingText: buildSubjectRoutingText(cleanedQuestion, supportedSubject),
+        question: solverQuestion,
         chunks: [],
         metadatas: [],
       });
@@ -849,7 +863,7 @@ export const askQuestion = asyncHandler(async (req, res) => {
         sources: [],
         source_type: "gemini",
         answer_source: "gemini_solver",
-        filters_used: `${resolvedGeminiTextRoute}_gemini_solver`,
+        filters_used: `${directGeminiTextRoute}_gemini_solver`,
       };
     } else {
       result = await routeRagQuestion({
