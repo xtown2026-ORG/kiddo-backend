@@ -80,6 +80,7 @@ export const updateSchoolBranding = asyncHandler(async (req, res) => {
     school_id,
     school_name,
     logo_file: req.files && req.files.length > 0 ? req.files[0] : null,
+    remove_logo: req.body.remove_logo,
   });
 
   res.json({
@@ -96,7 +97,7 @@ export const getMySchoolBranding = asyncHandler(async (req, res) => {
     return res.status(403).json({ message: "No school associated with this user." });
   }
 
-  const school = await getSchoolDetailsService(school_id);
+  const school = await getSchoolDetailsService({ requester: req.user, school_id });
   if (!school) {
     return res.status(404).json({ message: "School not found." });
   }

@@ -67,10 +67,11 @@ import PaymentLog from "../modules/payment-logs/payment-log.model.js";
 
 /* ===================== GROUP CHAT ===================== */
 import GroupChat from "../modules/group-chat/group-chat.model.js";
-
 import GroupChatMember from "../modules/group-chat/group-chat-member.model.js";
 import GroupChatMessage from "../modules/group-chat/group-chat-message.model.js";
 
+/* ===================== SETTINGS ===================== */
+import SystemSetting from "../modules/settings/setting.model.js";
 
 const initAssociations = () => {
   /* ==================== SCHOOL ==================== */

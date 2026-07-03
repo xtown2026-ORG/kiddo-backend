@@ -59,7 +59,7 @@ const httpServer = createServer(app);
 
 const io = new Server(httpServer, {
   cors: {
-    origin: ALLOWED_ORIGINS,
+    origin: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: [
       "Content-Type",
@@ -80,7 +80,7 @@ initNotificationSocket(io);
 
 // MIDDLEWARES
 app.use(cors({
-  origin: ALLOWED_ORIGINS,
+  origin: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: [
     "Content-Type",
@@ -96,16 +96,15 @@ app.use(cors({
 
 
 app.use(express.json({ limit: "10mb" }));
-app.use(helmet());
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  crossOriginEmbedderPolicy: false
+}));
 app.use(morgan("dev"));
 app.use(
   "/uploads/ai-followups",
   express.static(path.join(process.cwd(), "uploads", "ai-followups"))
 );
-
-app.use(express.json({ limit: "10mb" }));
-app.use(helmet());
-app.use(morgan("dev"));
 app.use(
   "/uploads",
   express.static(path.join(process.cwd(), "uploads"))
@@ -113,6 +112,10 @@ app.use(
 app.use(
   "/uploads/ai-followups",
   express.static(path.join(process.cwd(), "uploads", "ai-followups"))
+);
+app.use(
+  "/uploads/global",
+  express.static(path.join(process.cwd(), "uploads", "global"))
 );
 
 
@@ -196,6 +199,7 @@ import paymentLogRoutes from "./src/modules/payment-logs/payment-log.routes.js";
 import voiceRoutes from "./src/modules/voice-logs/voice.routes.js";
 import mindscopeRoutes from "./src/modules/mindscope/mindscope.routes.js";
 import billingRoutes from "./src/modules/billing/billing.routes.js";
+import settingRoutes from "./src/modules/settings/setting.routes.js";
 
 
 
@@ -225,6 +229,7 @@ app.use("/api/exams", examRoutes);
 app.use("/api/payment-logs", paymentLogRoutes);
 app.use("/api/mindscope", mindscopeRoutes);
 app.use("/api/billing", billingRoutes);
+app.use("/api/settings", settingRoutes);
 
 // approvals
 app.use("/api", approvalRoutes);

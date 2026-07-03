@@ -1,5 +1,6 @@
 import School from "./school.model.js";
 import User from "../users/user.model.js";
+import SystemSetting from "../settings/setting.model.js";
 import AppError from "../../shared/appError.js";
 import { getPagination } from "../../shared/utils/pagination.js";
 import fs from "fs";
@@ -9,6 +10,25 @@ export const SCHOOLS_UPLOAD_DIR = path.join(process.cwd(), "uploads", "schools")
 if (!fs.existsSync(SCHOOLS_UPLOAD_DIR)) {
   fs.mkdirSync(SCHOOLS_UPLOAD_DIR, { recursive: true });
 }
+
+const removeGlobalBrandingFile = (logoPath) => {
+  if (!logoPath) return;
+
+  try {
+    const cleanLogoPath = logoPath.split("?")[0];
+    if (!cleanLogoPath.startsWith("/uploads/global/branding/")) return;
+
+    const oldFilename = cleanLogoPath.split("/").pop();
+    if (!oldFilename) return;
+
+    const oldFilepath = path.join(process.cwd(), "uploads", "global", "branding", oldFilename);
+    if (fs.existsSync(oldFilepath)) {
+      fs.unlinkSync(oldFilepath);
+    }
+  } catch (err) {
+    console.error("Error removing old global logo file:", err);
+  }
+};
 
 /* =========================
    SUPER ADMIN: CREATE SCHOOL
@@ -212,7 +232,7 @@ export const getSchoolDetailsService = async ({ requester, school_id }) => {
 /* =========================
    SCHOOL BRANDING
 ========================= */
-export const updateSchoolBrandingService = async ({ school_id, school_name, logo_file }) => {
+export const updateSchoolBrandingService = async ({ school_id, school_name, logo_file, remove_logo }) => {
   const school = await School.findByPk(school_id);
   if (!school) {
     throw new AppError("School not found", 404);
@@ -222,20 +242,57 @@ export const updateSchoolBrandingService = async ({ school_id, school_name, logo
   if (school_name) {
     updateData.school_name = school_name;
   }
+  let globalLogoValue;
+  let shouldRemoveGlobalLogo = false;
 
-  if (logo_file) {
+  const removeOldLogoFile = (oldUrl) => {
+    if (oldUrl) {
+      try {
+        const oldFilename = oldUrl.split('?')[0].split('/').pop();
+        if (oldFilename) {
+          const oldFilepath = path.join(SCHOOLS_UPLOAD_DIR, oldFilename);
+          if (fs.existsSync(oldFilepath)) {
+            fs.unlinkSync(oldFilepath);
+          }
+        }
+      } catch (err) {
+        console.error("Error removing old school logo file:", err);
+      }
+    }
+  };
+
+  if (remove_logo === "true" || remove_logo === true) {
+    updateData.logo_url = null;
+    removeOldLogoFile(school.logo_url);
+    shouldRemoveGlobalLogo = true;
+  } else if (logo_file) {
     const ext = path.extname(logo_file.originalname) || ".png";
-    const filename = `logo_${school_id}_${Date.now()}${ext}`;
+    const filename = `branding_${school_id}_${Date.now()}${ext}`;
     const filepath = path.join(SCHOOLS_UPLOAD_DIR, filename);
 
     fs.writeFileSync(filepath, logo_file.buffer);
+    removeOldLogoFile(school.logo_url);
 
     // Provide a relative path for the static server
     updateData.logo_url = `/uploads/schools/${filename}?v=${Date.now()}`;
+    globalLogoValue = updateData.logo_url;
   }
 
   if (Object.keys(updateData).length > 0) {
     await school.update(updateData);
+  }
+
+  if (shouldRemoveGlobalLogo) {
+    const oldGlobalLogo = await SystemSetting.findOne({ where: { key: "global_logo" } });
+    await SystemSetting.destroy({ where: { key: "global_logo" } });
+    removeGlobalBrandingFile(oldGlobalLogo?.value);
+  } else if (globalLogoValue) {
+    const oldGlobalLogo = await SystemSetting.findOne({ where: { key: "global_logo" } });
+    await SystemSetting.upsert({
+      key: "global_logo",
+      value: globalLogoValue,
+    });
+    removeGlobalBrandingFile(oldGlobalLogo?.value);
   }
 
   return school;
