@@ -727,6 +727,7 @@ export const askQuestion = asyncHandler(async (req, res) => {
     query,
     selectedSubject,
     subject,
+    solverMode,
     classLevel,
     language,
     preferredLanguage,
@@ -746,6 +747,7 @@ export const askQuestion = asyncHandler(async (req, res) => {
   } = payload;
 
   const requestQuestion = question || query;
+  const isSolverMode = solverMode === true || solverMode === "true";
   const resolvedSubject = resolveQuestionSubject({
     question,
     selectedSubject,
@@ -781,10 +783,16 @@ export const askQuestion = asyncHandler(async (req, res) => {
         ...imageInput,
         question: cleanedQuestion,
       });
+      const finalAnswer =
+        answer || "I could not generate an answer from the image right now.";
+
+      if (isSolverMode) {
+        return res.json({ finalAnswer });
+      }
 
       return res.json({
         question: cleanedQuestion || IMAGE_QUESTION_TEXT,
-        answer: answer || "I could not generate an answer from the image right now.",
+        answer: finalAnswer,
         sources: [],
         source_type: "gemini",
         filters_used: "image_gemini_solver",
@@ -949,6 +957,10 @@ export const askQuestion = asyncHandler(async (req, res) => {
       classLevel: effectiveClassLevel,
       tokensUsed: result?.tokens_used || 0,
     });
+
+    if (isSolverMode) {
+      return res.json({ finalAnswer: textAnswer });
+    }
 
     const followupSuggestions = shouldAttachStudentFollowups({
       userRole: req.user?.role,

@@ -156,6 +156,7 @@ import attendanceSummaryRoutes from "./src/modules/attendance/attendance.summary
 import attendanceAnalyticsRoutes from "./src/modules/attendance/attendance.analytics.routes.js";
 
 import ragRoutes from "./src/modules/rag/rag.routes.js";
+import relatedQuestionRoutes from "./src/modules/related-questions/relatedQuestion.routes.js";
 
 import aiChatRoutes from "./src/modules/ai-chat/ai-chat.routes.js";
 
@@ -260,6 +261,8 @@ app.use("/api/utils", utilsRoutes);
 app.use("/api/ai-chat", aiChatRoutes);
 app.use("/api/rag", ragRoutes);
 app.use("/api/rag", ragRoutes);
+app.use("/api/related-questions", relatedQuestionRoutes);
+app.use("/related-questions", relatedQuestionRoutes);
 app.use("/api/ai-followup", aiFollowupRoutes);
 
 app.use("/api", teacherAiRoutes);

@@ -56,15 +56,28 @@ test("does not apply mismatch validation without a subject-button selection", ()
   assert.equal(result.isMatch, true);
 });
 
-test("rejects a selected subject when detection is not confident", () => {
+test("allows a selected subject when detection is not confident", () => {
   const result = validateQuestionSubject({
     question: "Explain this topic in simple words",
     subject: "Physics",
   });
 
   assert.equal(result.detectedSubject, null);
-  assert.equal(result.shouldReject, true);
-  assert.equal(result.isMatch, false);
+  assert.equal(result.shouldReject, false);
+  assert.equal(result.isMatch, true);
+});
+
+test("allows permutation-style Maths questions without an explicit subject label", () => {
+  const questions = [
+    "In how many ways can 5 students be seated in a row?",
+    "How many four-digit numbers can be formed from 1, 2, 3, 4 without repetition?",
+  ];
+
+  for (const question of questions) {
+    const result = validateQuestionSubject({ question, selectedSubject: "Maths" });
+    assert.equal(result.detectedSubject, "Maths");
+    assert.equal(result.shouldReject, false);
+  }
 });
 
 test("button-selected subject has priority over text detection", () => {
