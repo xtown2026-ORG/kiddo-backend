@@ -17,6 +17,7 @@ const SUBJECT_PATTERNS = Object.freeze({
     /\d\s*[+\-*/\u00d7\u00f7]\s*\d/,
     /(?:\b(?:largest|smallest|greatest|least|ascending|descending|greater|lesser)\b[^\n]*\d|\d[^\n]*\b(?:largest|smallest|greatest|least|ascending|descending|greater|lesser)\b)/i,
     /\b(?:compare|arrange|order)\b[^\n]*\d/i,
+    /\b(?:how\s+many\s+(?:ways|arrangements?)|number\s+of\s+(?:ways|arrangements?)|can\s+be\s+(?:arranged|formed)|without\s+repetition|with\s+repetition|factorial|n\s*[pc]\s*r)\b/i,
   ],
   Physics: [
     /\b(?:physics|kinematics|dynamics|velocity|acceleration|momentum|inertia|force|newton(?:'s)?\s+law|kinetic\s+energy|potential\s+energy|work\s+done|power|gravity|gravitational|friction|pressure|density|displacement|distance|speed|time|current|voltage|resistance|ohm(?:'s)?\s+law|electric(?:ity|al)?|magnetism|magnetic|wavelength|frequency|refraction|reflection|lens|mirror|optics|thermodynamics|heat|temperature)\b/i,
@@ -81,7 +82,9 @@ export const validateQuestionSubject = ({ question, selectedSubject, subject }) 
   const normalizedSelectedSubject = normalizeSelectedSubject(selectedSubject ?? subject);
   const detectedSubject = detectQuestionSubject(question);
   const shouldReject = Boolean(
-    normalizedSelectedSubject && normalizedSelectedSubject !== detectedSubject
+    normalizedSelectedSubject &&
+      detectedSubject &&
+      normalizedSelectedSubject !== detectedSubject
   );
 
   return {
