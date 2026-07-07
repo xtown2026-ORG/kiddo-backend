@@ -1,4 +1,4 @@
-import { listAuditLogsService } from "./audit.service.js";
+import { listAuditLogsService, getAuditMetricsService } from "./audit.service.js";
 
 export const listAuditLogs = async (req, res, next) => {
   try {
@@ -11,6 +11,17 @@ export const listAuditLogs = async (req, res, next) => {
       total: result.count,
       items: result.rows,
     });
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const getAuditMetrics = async (req, res, next) => {
+  try {
+    const metrics = await getAuditMetricsService({
+      school_id: req.user.school_id,
+    });
+    res.json(metrics);
   } catch (e) {
     next(e);
   }

@@ -108,3 +108,56 @@ export const triggerReportCardNotification = async ({
     section_id,
   });
 };
+
+/* ===============================
+   PROFILE UPDATE REQUEST
+================================ */
+export const triggerProfileUpdateNotification = async ({
+  school_id,
+  sender_user_id,
+  sender_role,
+  student_name,
+  parent_name,
+  changed_fields = [],
+  class_id,
+  section_id,
+}) => {
+  let userDesc = "";
+  if (sender_role === "student" && student_name) userDesc = `Student ${student_name}`;
+  else if (sender_role === "parent" && parent_name) userDesc = `Parent ${parent_name}`;
+  else userDesc = `${sender_role} user`;
+
+  const fieldLabels = {
+    name: 'Name', phone: 'Phone', email: 'Email',
+    dob: 'Date of Birth', gender: 'Gender', blood_group: 'Blood Group',
+    father_name: 'Father Name', mother_name: 'Mother Name',
+    guardian_name: 'Guardian Name', father_occupation: 'Father Occupation',
+    mother_occupation: 'Mother Occupation', address: 'Address',
+    family_income: 'Family Income', relation_type: 'Relation Type',
+    avatar_url: 'Profile Photo',
+  };
+
+  let changesText = "profile update request";
+  if (changed_fields && changed_fields.length > 0) {
+    if (changed_fields.length === 1) {
+      const f = changed_fields[0];
+      changesText = `${fieldLabels[f] || f.replace(/_/g, ' ')} change request`;
+    } else {
+      const labels = changed_fields.map(f => fieldLabels[f] || f.replace(/_/g, ' '));
+      changesText = `${labels.join(', ')} change request`;
+    }
+  }
+
+  const message = `${userDesc} submitted a ${changesText}.`;
+
+  return createNotification({
+    school_id,
+    sender_user_id,
+    sender_role: "school_admin", // Bypass DB ENUM restriction which only allows school_admin or teacher
+    title: "Profile Update Request",
+    message,
+    target_role: "teacher", 
+    class_id,
+    section_id,
+  });
+};

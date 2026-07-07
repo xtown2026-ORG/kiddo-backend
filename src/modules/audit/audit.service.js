@@ -1,36 +1,46 @@
 import { Op } from "sequelize";
 import AuditLog from "./audit-log.model.js";
-import User from "../users/user.model.js";
 import { getPagination } from "../../shared/utils/pagination.js";
 
 export const listAuditLogsService = async ({ school_id, query }) => {
   const { limit, offset } = getPagination(query);
   const safeQuery = query || {};
-  const { entity_type, entity_id, from_date, to_date } = safeQuery;
+  const { 
+    entity_type, 
+    entity_id, 
+    from_date, 
+    to_date, 
+    module, 
+    action, 
+    status,
+    user_id,
+    role,
+    search // generic search term
+  } = safeQuery;
 
-  const schoolUsers = await User.findAll({
-    where: { school_id },
-    attributes: ["id"],
-    raw: true,
-  });
-  const userIds = schoolUsers
-    .map((user) => Number(user?.id))
-    .filter((id) => Number.isFinite(id));
-
-  if (!userIds.length) {
-    return { count: 0, rows: [] };
+  const where = {};
+  
+  if (school_id) {
+    where.school_id = school_id;
   }
 
-  const where = {
-    performed_by: { [Op.in]: userIds },
-  };
+  if (entity_type) where.entity_type = entity_type;
+  if (entity_id) where.entity_id = String(entity_id);
+  if (module) where.module = module;
+  if (action) where.action = action;
+  if (status) where.status = status;
+  if (user_id) where.user_id = user_id;
+  if (role) where.role = role;
 
-  if (entity_type) {
-    where.entity_type = entity_type;
-  }
-
-  if (entity_id) {
-    where.entity_id = Number(entity_id);
+  if (search) {
+    const q = `%${search}%`;
+    where[Op.or] = [
+      { user_name: { [Op.iLike]: q } },
+      { action: { [Op.iLike]: q } },
+      { module: { [Op.iLike]: q } },
+      { description: { [Op.iLike]: q } },
+      { entity_id: { [Op.iLike]: q } },
+    ];
   }
 
   if (from_date || to_date) {
@@ -45,4 +55,40 @@ export const listAuditLogsService = async ({ school_id, query }) => {
     offset,
     order: [["created_at", "DESC"]],
   });
+};
+
+export const getAuditMetricsService = async ({ school_id }) => {
+  const where = {};
+  if (school_id) {
+    where.school_id = school_id;
+  }
+  
+  // Total logs
+  const total = await AuditLog.count({ where });
+
+  // Today's logs
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const today = await AuditLog.count({ 
+    where: { ...where, created_at: { [Op.gte]: startOfToday } } 
+  });
+
+  // Successful vs Failed
+  const successful = await AuditLog.count({ where: { ...where, status: "Success" } });
+  const failed = await AuditLog.count({ where: { ...where, status: "Failed" } });
+  
+  // Logins
+  const logins = await AuditLog.count({ where: { ...where, action: "Login" } });
+
+  // Warnings / Security
+  const warnings = await AuditLog.count({ where: { ...where, status: "Warning" } });
+
+  return {
+    total,
+    today,
+    successful,
+    failed,
+    logins,
+    warnings
+  };
 };

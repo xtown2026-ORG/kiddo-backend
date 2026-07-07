@@ -6,6 +6,7 @@ import Student from "../students/student.model.js";
 import AppError from "../../shared/appError.js";
 import { getPagination } from "../../shared/utils/pagination.js";
 import { resolveParentFamilyUserIds } from "./parent.family.service.js";
+import { triggerProfileUpdateNotification } from "../notifications/notification-trigger.service.js";
 
 /* =========================
    ADMIN: CREATE PARENT + LINK
@@ -213,30 +214,78 @@ export const updateParentProfileService = async (user_id, data) => {
   }
 
   const normalizedRelationType = data?.relation_type;
-  const userUpdateData = { ...data };
+  const rawUserUpdateData = { ...data };
 
-  delete userUpdateData.relation_type;
+  delete rawUserUpdateData.relation_type;
 
   if (sharedLinkedStudentPhone) {
-    userUpdateData.phone = null;
+    rawUserUpdateData.phone = null;
   }
 
-  await user.update(userUpdateData);
+  // DO NOT immediately apply user updates
+  // await user.update(rawUserUpdateData);
 
   const parent = await Parent.findOne({ where: { user_id } });
   if (parent) {
+    // Only keep user fields that actually changed vs current DB values
+    const userUpdateData = {};
+    const userFields = ['name', 'phone', 'email', 'avatar_url'];
+    userFields.forEach(field => {
+      if (rawUserUpdateData[field] !== undefined) {
+        const currentVal = (user[field] ?? '').toString().trim();
+        const newVal = (rawUserUpdateData[field] ?? '').toString().trim();
+        if (newVal !== currentVal) {
+          userUpdateData[field] = rawUserUpdateData[field];
+        }
+      }
+    });
+
+    // Only store relation_type change if it actually changed
+    let finalRelationType = null;
+    if (normalizedRelationType) {
+      const currentRelation = (parent.relation_type ?? '').toString().trim();
+      const newRelation = normalizedRelationType.toString().trim();
+      if (newRelation !== currentRelation) {
+        finalRelationType = normalizedRelationType;
+      }
+    }
+
+    const parentPendingUpdates = {};
+    if (finalRelationType) {
+      parentPendingUpdates.relation_type = finalRelationType;
+    }
+
+    const totalChanges = Object.keys(userUpdateData).length + Object.keys(parentPendingUpdates).length;
+    if (totalChanges === 0) {
+      return user; // No actual changes
+    }
+
     const parentUpdateData = {
+      pending_updates: { user: userUpdateData, parent: parentPendingUpdates },
       approval_status: "pending",
       approved_by: null,
       approved_at: null,
       rejection_reason: null,
     };
 
-    if (normalizedRelationType) {
-      parentUpdateData.relation_type = normalizedRelationType;
-    }
-
     await parent.update(parentUpdateData);
+
+    const changedFields = [...Object.keys(userUpdateData), ...Object.keys(parentPendingUpdates)];
+
+    
+    // Find the linked student for class/section id to send notification correctly
+    // Normally parents could have multiple students, just use the primary one
+    const student = await Student.findByPk(parent.student_id);
+
+    await triggerProfileUpdateNotification({
+      school_id: user.school_id,
+      sender_user_id: user_id,
+      sender_role: "parent",
+      parent_name: user.name,
+      changed_fields: changedFields,
+      class_id: student ? student.class_id : null,
+      section_id: student ? student.section_id : null,
+    });
   }
   return user;
 };

@@ -9,7 +9,10 @@ import User from "../users/user.model.js";
 import TeacherAssignment from "../teacher-assignments/teacher-assignment.model.js";
 import Class from "../classes/classes.model.js";
 import Section from "../sections/section.model.js";
+import AuditLog from "../audit/audit-log.model.js";
 import { resolveTeacherId } from "../../shared/utils/resolveTeacherId.js";
+import Notification from "../notifications/notification.model.js";
+import NotificationAck from "../notifications/notification-ack.model.js";
 
 const resolveSchoolId = (school_id, user) => {
   const resolved = school_id ?? user?.school_id;
@@ -173,6 +176,201 @@ export const getPendingParentApprovalsForTeacherService = async ({
     order: [["updated_at", "DESC"]],
   });
 };
+
+/* =========================
+   TEACHER: APPROVAL HISTORY
+========================= */
+export const getTeacherApprovalHistoryService = async ({
+  school_id,
+  user,
+  query,
+}) => {
+  const scopedSchoolId = resolveSchoolId(school_id, user);
+
+  if (!user || !user.id) {
+    return { count: 0, rows: [] };
+  }
+
+  const statusCondition = { [Op.in]: ["approved", "rejected"] };
+
+  // ── Get teacher's section IDs ─────────────────────────────────────
+  let sectionIds = [];
+  try {
+    const teacherRecord = await Teacher.findOne({ where: { user_id: user.id }, attributes: ["id"] });
+    if (teacherRecord) {
+      const assignments = await TeacherAssignment.findAll({
+        where: { school_id: scopedSchoolId, teacher_id: teacherRecord.id, is_active: true },
+        attributes: ["section_id"],
+      });
+      sectionIds = assignments.map((a) => a.section_id);
+    }
+  } catch (e) {
+    // If lookup fails, show all school data
+  }
+
+  // ── STUDENT HISTORY (from student table - backward compatible) ────
+  const studentWhere = { school_id: scopedSchoolId, approval_status: statusCondition };
+  if (sectionIds.length > 0) {
+    studentWhere.section_id = { [Op.in]: sectionIds };
+  }
+
+  const studentHistory = await Student.findAll({
+    where: studentWhere,
+    include: [
+      { model: User, attributes: ["id", "name", "username", "email", "phone"] },
+      { model: Class, attributes: ["id", "class_name"] },
+      { model: Section, attributes: ["id", "name"] },
+    ],
+    order: [["updated_at", "DESC"]],
+    limit: 50,
+  });
+
+  // ── PARENT HISTORY (from parent table - backward compatible) ──────
+  const parentHistory = await Parent.findAll({
+    where: { approval_status: statusCondition },
+    include: [
+      {
+        model: User,
+        required: true,
+        where: { school_id: scopedSchoolId },
+        attributes: ["id", "name", "username", "email", "phone"],
+      },
+      {
+        model: Student,
+        ...(sectionIds.length > 0 ? { where: { section_id: { [Op.in]: sectionIds } }, required: true } : {}),
+        include: [
+          { model: Class, attributes: ["id", "class_name"] },
+          { model: Section, attributes: ["id", "name"] },
+        ],
+      },
+    ],
+    order: [["updated_at", "DESC"]],
+    limit: 50,
+  });
+
+  // ── ALSO get per-event entries from audit_logs (new approvals) ────
+  const studentAuditLogs = await AuditLog.findAll({
+    where: {
+      entity_type: "student",
+      action: { [Op.in]: ["approve", "reject"] },
+    },
+    order: [["created_at", "DESC"]],
+    limit: 200,
+  });
+
+  // ── Approver names ─────────────────────────────────────────────────
+  const approverIds = [...new Set([
+    ...studentHistory.map((s) => s.approved_by),
+    ...parentHistory.map((p) => p.approved_by),
+  ].filter(Boolean))];
+  const approverMap = {};
+  if (approverIds.length > 0) {
+    const approvers = await User.findAll({
+      where: { id: { [Op.in]: approverIds } },
+      attributes: ["id", "name"],
+    });
+    approvers.forEach((a) => { approverMap[a.id] = a.name; });
+  }
+
+  // ── Build student map for audit log lookup ─────────────────────────
+  const studentIds = [...new Set(studentAuditLogs.map((l) => l.entity_id).filter(Boolean))];
+  const studentMapForAudit = {};
+  if (studentIds.length > 0) {
+    const students = await Student.findAll({
+      where: { id: { [Op.in]: studentIds.map(Number).filter(Boolean) }, school_id: scopedSchoolId },
+      include: [
+        { model: User, attributes: ["id", "name", "username"] },
+        { model: Class, attributes: ["id", "class_name"] },
+        { model: Section, attributes: ["id", "name"] },
+      ],
+    });
+    students.forEach((s) => { studentMapForAudit[String(s.id)] = s; });
+  }
+
+  // Filter audit logs to teacher's sections
+  const filteredAuditLogs = studentAuditLogs.filter((log) => {
+    const student = studentMapForAudit[String(log.entity_id)];
+    if (!student) return false;
+    if (sectionIds.length > 0) return sectionIds.includes(student.section_id);
+    return true;
+  });
+
+  // Fetch audit log approver names
+  const auditPerformedBy = [...new Set(filteredAuditLogs.map((l) => l.performed_by).filter(Boolean))];
+  if (auditPerformedBy.length > 0) {
+    const auditApprovers = await User.findAll({
+      where: { id: { [Op.in]: auditPerformedBy } },
+      attributes: ["id", "name"],
+    });
+    auditApprovers.forEach((a) => { approverMap[a.id] = a.name; });
+  }
+
+  // ── Map student table rows ─────────────────────────────────────────
+  // Track which student IDs are covered by audit logs (to avoid duplicates)
+  const auditCoveredStudentIds = new Set(filteredAuditLogs.map((l) => String(l.entity_id)));
+
+  const mappedStudentsFromTable = studentHistory
+    .filter((s) => !auditCoveredStudentIds.has(String(s.id))) // skip if audit log has it
+    .map((s) => ({
+      id: `tbl-s-${s.id}`,
+      history_type: "student",
+      approval_status: s.approval_status,
+      rejection_reason: s.rejection_reason || null,
+      updated_at: s.updated_at,
+      pending_updates: s.pending_updates || {},
+      user: s.user?.toJSON?.() || {},
+      class: s.class?.toJSON?.() || { class_name: "-" },
+      section: s.section?.toJSON?.() || { name: "-" },
+      approver: approverMap[s.approved_by] ? { name: approverMap[s.approved_by] } : null,
+    }));
+
+  const mappedStudentsFromAudit = filteredAuditLogs.map((log) => {
+    const student = studentMapForAudit[String(log.entity_id)];
+    const snap = log.new_value || {};
+    return {
+      id: `audit-s-${log.id}`,
+      history_type: "student",
+      approval_status: log.action === "approve" ? "approved" : "rejected",
+      rejection_reason: log.remark || null,
+      updated_at: log.created_at,
+      pending_updates: snap.pending_updates || {},
+      user: student?.user?.toJSON?.() || snap.user || {},
+      class: student?.class?.toJSON?.() || { class_name: "-" },
+      section: student?.section?.toJSON?.() || { name: "-" },
+      approver: approverMap[log.performed_by] ? { name: approverMap[log.performed_by] } : null,
+    };
+  });
+
+  // ── Map parent table rows ──────────────────────────────────────────
+  const mappedParents = parentHistory.map((p) => ({
+    id: `tbl-p-${p.id}`,
+    history_type: "parent",
+    approval_status: p.approval_status,
+    rejection_reason: p.rejection_reason || null,
+    updated_at: p.updated_at,
+    pending_updates: p.pending_updates || {},
+    user: p.user?.toJSON?.() || {},
+    student: {
+      class: p.student?.class?.toJSON?.() || { class_name: "-" },
+      section: p.student?.section?.toJSON?.() || { name: "-" },
+    },
+    approver: approverMap[p.approved_by] ? { name: approverMap[p.approved_by] } : null,
+  }));
+
+  const combined = [
+    ...mappedStudentsFromAudit,   // per-event (new)
+    ...mappedStudentsFromTable,   // one per student (old, backward compat)
+    ...mappedParents,
+  ].sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+
+  return {
+    count: combined.length,
+    rows: combined.slice(0, 50),
+  };
+};
+
+
+
 
 /* =========================
    ADMIN: TEACHER PENDING
@@ -382,13 +580,68 @@ export const processApprovalAction = async ({
     }
   }
 
-  // 5. Update Status
+  // 5. Update Status and Apply Pending Updates
+  let finalPendingUpdates = entity.pending_updates;
+
+  if (action === "approve" && entity.pending_updates) {
+    const { user: userUpdates, student: studentUpdates, parent: parentUpdates, teacher: teacherUpdates } = entity.pending_updates;
+
+    // Snapshot old values before applying
+    const oldValues = {};
+    if (userUpdates) {
+      const u = await User.findByPk(entity.user_id);
+      if (u) {
+        for (const k of Object.keys(userUpdates)) oldValues[`user_${k}`] = u[k];
+      }
+    }
+    const entityUpdates = studentUpdates || parentUpdates || teacherUpdates;
+    if (entityUpdates) {
+      for (const k of Object.keys(entityUpdates)) oldValues[k] = entity[k];
+    }
+    
+    finalPendingUpdates = {
+      ...entity.pending_updates,
+      _history_old_values: oldValues
+    };
+
+    if (userUpdates && Object.keys(userUpdates).length > 0) {
+      await User.update(userUpdates, { where: { id: entity.user_id } });
+    }
+
+    if (entityUpdates && Object.keys(entityUpdates).length > 0) {
+      await entity.update(entityUpdates);
+    }
+  }
+
+  // Common status update, preserving pending_updates for history
   await entity.update({
     approval_status: status,
     approved_by: user.id,
     approved_at: new Date(),
-    rejection_reason: action === "reject" ? (rejection_reason || null) : null
+    rejection_reason: action === "reject" ? (rejection_reason || null) : null,
+    pending_updates: finalPendingUpdates
   });
+
+  // Acknowledge the notification automatically for this user
+  try {
+    const notifications = await Notification.findAll({
+      where: {
+        school_id: user.school_id,
+        title: "Profile Update Request",
+        sender_user_id: entity.user_id,
+      },
+      attributes: ["id"]
+    });
+
+    for (const notif of notifications) {
+      await NotificationAck.findOrCreate({
+        where: { notification_id: notif.id, user_id: user.id },
+        defaults: { notification_id: notif.id, user_id: user.id }
+      });
+    }
+  } catch (err) {
+    console.error("Failed to acknowledge notifications during approval", err);
+  }
 
   return entity;
 };

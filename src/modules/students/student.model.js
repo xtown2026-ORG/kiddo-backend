@@ -93,6 +93,11 @@ const Student = db.define(
       defaultValue: true,
     },
 
+    pending_updates: {
+      type: DataTypes.JSON,
+      allowNull: true,
+    },
+
     approval_status: {
       type: DataTypes.ENUM("pending", "approved", "rejected"),
       allowNull: false,

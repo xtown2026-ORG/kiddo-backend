@@ -11,6 +11,12 @@ export const createNotificationSchema = z.object({
   section_id: z.number().int().positive().optional(),
 });
 
-
+export const updateNotificationSchema = z.object({
+  title: z.string().min(1).optional(),
+  message: z.string().min(1).optional(),
+  target_role: z.enum(["teacher", "parent", "student", "all"]).optional(),
+  class_id: z.number().int().positive().optional().nullable(),
+  section_id: z.number().int().positive().optional().nullable(),
+});
 /* parent / teacher: acknowledge */
 export const acknowledgeNotificationSchema = z.object({});

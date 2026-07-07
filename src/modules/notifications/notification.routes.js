@@ -5,10 +5,13 @@ import { allowRoles } from "../../shared/middlewares/role.js";
 
 import {
   createNotificationSchema,
+  updateNotificationSchema,
 } from "./notification.schema.js";
 import {
   createNotification,
   listNotifications,
+  updateNotification,
+  deleteNotification,
 } from "./notification.controller.js";
 import {
   acknowledgeNotification,
@@ -25,6 +28,19 @@ router.post(
   allowRoles("school_admin", "teacher"),
   validate(createNotificationSchema),
   createNotification
+);
+
+router.put(
+  "/:id",
+  allowRoles("school_admin", "teacher"),
+  validate(updateNotificationSchema),
+  updateNotification
+);
+
+router.delete(
+  "/:id",
+  allowRoles("school_admin", "teacher"),
+  deleteNotification
 );
 
 /* all logged-in users */

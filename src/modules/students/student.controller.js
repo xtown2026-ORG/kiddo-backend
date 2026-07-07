@@ -98,6 +98,14 @@ export const completeStudentProfile = asyncHandler(async (req, res) => {
   });
   if (!student) throw new AppError("Student profile not found", 404);
 
+  const isProfileUpdate = student.approval_status === "approved" && !req.user.first_login;
+
+  if (isProfileUpdate) {
+    const { requestStudentProfileUpdateService } = await import("./student.approval.service.js");
+    await requestStudentProfileUpdateService(req.user.id, req.body);
+    return res.json({ message: "Profile update request submitted", user: req.user });
+  }
+
   if (req.body.email) {
     const existing = await User.findOne({ where: { email: req.body.email } });
     if (existing && existing.id !== req.user.id) {
@@ -112,9 +120,7 @@ export const completeStudentProfile = asyncHandler(async (req, res) => {
   }
   if (req.body.email !== undefined) userUpdates.email = req.body.email;
   if (avatar_url !== undefined) userUpdates.avatar_url = avatar_url || null;
-  if (req.user.first_login) {
-    userUpdates.first_login = false;
-  }
+  userUpdates.first_login = false;
 
   if (Object.keys(userUpdates).length > 0) {
     await User.update(userUpdates, { where: { id: req.user.id } });

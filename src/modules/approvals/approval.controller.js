@@ -3,6 +3,7 @@ import {
   getPendingParentApprovalsForTeacherService,
   getPendingTeacherApprovalsService,
   getPendingParentApprovalsService,
+  getTeacherApprovalHistoryService,
 } from "./approval.service.js";
 
 /* =========================
@@ -35,6 +36,22 @@ export const getTeacherPendingApprovals = async (req, res, next) => {
         total: parents.count,
         items: parents.rows,
       },
+    });
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const getTeacherApprovalHistory = async (req, res, next) => {
+  try {
+    const history = await getTeacherApprovalHistoryService({
+      user: req.user,
+      query: req.query,
+    });
+
+    res.json({
+      total: history.count,
+      items: history.rows,
     });
   } catch (e) {
     next(e);

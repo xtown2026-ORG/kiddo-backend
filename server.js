@@ -9,6 +9,10 @@ dotenv.config();
 import db from "./src/config/db.js";
 import errorHandler from "./src/shared/errorHandler.js";
 import "./src/models/initModels.js";
+import initCronJobs from "./src/shared/utils/cron.js";
+
+// Init scheduled tasks
+initCronJobs();
 
 // socket
 import { createServer } from "http";
@@ -39,7 +43,8 @@ const ALLOWED_ORIGINS = [
   "http://192.168.1.6:5174/",
   "http://192.168.1.4:5174",
   "http://192.168.1.4:5176",
-  "http://192.168.1.34:5174"
+  "http://192.168.1.34:5174",
+  "http://192.168.1.40:9000"
 ];
 
 
@@ -321,7 +326,7 @@ try {
     await db.query(
       'DROP INDEX IF EXISTS "teacher_assignments_school_id_teacher_id_class_id_section_id_su";'
     );
-    
+
     // Homework ERP Module fields
     await db.query(
       "ALTER TABLE homeworks ADD COLUMN IF NOT EXISTS title VARCHAR(255);"
@@ -332,11 +337,16 @@ try {
     await db.query(
       "ALTER TABLE homeworks ADD COLUMN IF NOT EXISTS attachment_url VARCHAR(1000);"
     );
+
+    // Audit Logs overhaul
+    await db.query(
+      "DROP TABLE IF EXISTS audit_logs CASCADE;"
+    );
   } catch (e) {
     // Ignore if the table doesn't exist yet (fresh DB); `sync()` will create it.
   }
 
-  await db.sync({ force : false });
+  await db.sync({ force: false });
 
   httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`Server + Socket running on port ${PORT}`);

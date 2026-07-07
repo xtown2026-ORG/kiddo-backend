@@ -2,6 +2,8 @@ import asyncHandler from "../../shared/asyncHandler.js";
 import {
   createNotificationService,
   listNotificationsForUserService,
+  updateNotificationService,
+  deleteNotificationService,
 } from "./notification.service.js";
 import { listApprovedParentLinks } from "../parents/parent.family.service.js";
 
@@ -112,5 +114,28 @@ export const listNotifications = asyncHandler(async (req, res) => {
           : null,
       };
     }),
+  });
+});
+
+export const updateNotification = asyncHandler(async (req, res) => {
+  const notification = await updateNotificationService(
+    req.params.id,
+    req.body,
+    req.user.id,
+    req.user.role
+  );
+
+  res.json({
+    success: true,
+    data: notification,
+  });
+});
+
+export const deleteNotification = asyncHandler(async (req, res) => {
+  await deleteNotificationService(req.params.id, req.user.id, req.user.role);
+
+  res.json({
+    success: true,
+    message: "Notification deleted successfully",
   });
 });

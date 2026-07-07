@@ -87,11 +87,33 @@ export const listNotificationsForUserService = async ({
         attributes: ["id", "user_id", "acknowledged_at"],
         required: false,
         where: { user_id },
-        // separate:true runs a sub-query so the LEFT JOIN isn't
-        // silently converted to INNER JOIN by the WHERE clause
         separate: true,
       },
     ],
     order: [["created_at", "DESC"]],
   });
+};
+
+export const updateNotificationService = async (id, payload, user_id, user_role) => {
+  const notification = await Notification.findByPk(id);
+  if (!notification) throw new AppError("Notification not found", 404);
+
+  if (user_role === "teacher" && notification.sender_user_id !== user_id) {
+    throw new AppError("Not authorized to update this notification", 403);
+  }
+
+  await notification.update(payload);
+  return notification;
+};
+
+export const deleteNotificationService = async (id, user_id, user_role) => {
+  const notification = await Notification.findByPk(id);
+  if (!notification) throw new AppError("Notification not found", 404);
+
+  if (user_role === "teacher" && notification.sender_user_id !== user_id) {
+    throw new AppError("Not authorized to delete this notification", 403);
+  }
+
+  await notification.destroy();
+  return true;
 };

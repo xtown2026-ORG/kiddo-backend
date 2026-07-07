@@ -143,9 +143,7 @@ export const completeTeacherProfile = asyncHandler(async (req, res) => {
         if (phone !== undefined) userUpdates.phone = phone;
         if (email !== undefined) userUpdates.email = email;
         if (avatar_url !== undefined) userUpdates.avatar_url = avatar_url || null;
-        if (req.user.first_login) {
-          userUpdates.first_login = false;
-        }
+        userUpdates.first_login = false;
 
         if (Object.keys(userUpdates).length > 0) {
           await User.update(userUpdates, {

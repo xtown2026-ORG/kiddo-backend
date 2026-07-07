@@ -4,6 +4,11 @@ import User from "../users/user.model.js";
 import AppError from "../../shared/appError.js";
 import { logApprovalAction } from "../../shared/utils/auditLogger.js";
 import TeacherAssignment from "../teacher-assignments/teacher-assignment.model.js";
+import { triggerProfileUpdateNotification } from "../notifications/notification-trigger.service.js";
+
+/* =========================
+   STUDENT: REQUEST UPDATE
+========================= */
 
 /* =========================
    STUDENT: REQUEST UPDATE
@@ -23,20 +28,87 @@ export const requestStudentProfileUpdateService = async (
   }
 
   const { avatar_url, ...studentUpdates } = updates || {};
+  const userUpdates = {};
+
+  // Load the current user record to compare against
+  const currentUser = await User.findByPk(user_id, {
+    attributes: ['name', 'phone', 'email', 'avatar_url'],
+  });
 
   if (avatar_url !== undefined) {
-    await User.update(
-      { avatar_url: avatar_url || null },
-      { where: { id: user_id } }
-    );
+    const currentAvatar = currentUser?.avatar_url || null;
+    const newAvatar = avatar_url || null;
+    if (newAvatar !== currentAvatar) {
+      userUpdates.avatar_url = newAvatar;
+    }
+  }
+
+  // Collect user-level fields — only if the value actually changed
+  const userFields = ['name', 'phone', 'email'];
+  userFields.forEach(field => {
+    if (updates[field] !== undefined) {
+      const currentVal = (currentUser?.[field] ?? '').toString().trim();
+      const newVal = (updates[field] ?? '').toString().trim();
+      if (newVal !== currentVal) {
+        userUpdates[field] = updates[field];
+      }
+      delete studentUpdates[field];
+    }
+  });
+
+  // Get current student record values for comparison
+  const studentData = student.get({ plain: true });
+  const studentFields = ['dob', 'gender', 'blood_group', 'father_name', 'mother_name',
+    'guardian_name', 'father_occupation', 'mother_occupation', 'address', 'family_income',
+    'aadhar_no', 'roll_no', 'admission_no'];
+
+  // Strip out student fields that did NOT actually change
+  studentFields.forEach(field => {
+    if (studentUpdates[field] !== undefined) {
+      const currentVal = (studentData[field] ?? '').toString().trim();
+      const newVal = (studentUpdates[field] ?? '').toString().trim();
+      if (newVal === currentVal) {
+        delete studentUpdates[field];
+      }
+    }
+  });
+
+  // Remove any leftover non-student fields from studentUpdates
+  const allowedStudentFields = new Set([...studentFields, 'gender', 'dob', 'address', 'blood_group']);
+  Object.keys(studentUpdates).forEach(k => {
+    if (!allowedStudentFields.has(k)) {
+      delete studentUpdates[k];
+    }
+  });
+
+  // If nothing actually changed, return early
+  const totalChanges = Object.keys(userUpdates).length + Object.keys(studentUpdates).length;
+  if (totalChanges === 0) {
+    return { message: "No changes detected" };
   }
 
   await student.update({
-    ...studentUpdates,
+    pending_updates: { user: userUpdates, student: studentUpdates },
     approval_status: "pending",
     approved_by: null,
     approved_at: null,
     rejection_reason: null, // ✅ IMPORTANT
+  });
+
+
+  const changedFields = [...Object.keys(userUpdates), ...Object.keys(studentUpdates)];
+  
+  // Need the user name to display in notification
+  const studentUser = await User.findByPk(user_id, { attributes: ['name'] });
+
+  await triggerProfileUpdateNotification({
+    school_id: student.school_id,
+    sender_user_id: user_id,
+    sender_role: "student",
+    student_name: studentUser ? studentUser.name : "Student",
+    changed_fields: changedFields,
+    class_id: student.class_id,
+    section_id: student.section_id,
   });
 
   return {
@@ -107,13 +179,26 @@ export const approveStudentProfileService = async ({
       );
     }
 
-    // ✅ AUDIT LOG (inside transaction)
+    // Load student user info for audit snapshot
+    const studentUser = await User.findByPk(student.user_id, {
+      attributes: ["id", "name", "username"],
+      transaction: t,
+    });
+
+    // ✅ AUDIT LOG with full snapshot (inside transaction)
     await logApprovalAction({
       entity_type: "student",
-      entity_id: student.id,
+      entity_id: String(student.id),
       action,
       remark,
       performed_by: teacher_user_id,
+      new_value: {
+        pending_updates: student.pending_updates || {},
+        user: { id: student.user_id, name: studentUser?.name, username: studentUser?.username },
+        class_id: student.class_id,
+        section_id: student.section_id,
+        school_id: student.school_id,
+      },
       transaction: t,
     });
 

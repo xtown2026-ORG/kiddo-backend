@@ -21,7 +21,7 @@ const Notification = db.define(
     },
 
     sender_role: {
-      type: DataTypes.ENUM("school_admin", "teacher"),
+      type: DataTypes.ENUM("school_admin", "teacher", "student", "parent"),
       allowNull: false,
     },
 

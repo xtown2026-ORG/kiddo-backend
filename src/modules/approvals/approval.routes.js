@@ -8,6 +8,7 @@ import {
   getTeacherPendingApprovals,
   getAdminPendingApprovals,
   approveRejectRequest,
+  getTeacherApprovalHistory,
 } from "./approval.controller.js";
 
 const router = express.Router();
@@ -21,6 +22,13 @@ router.get(
   allowRoles("teacher"),
   validate(listPendingApprovalsSchema),
   getTeacherPendingApprovals
+);
+
+router.get(
+  "/teachers/approvals/history",
+  protect,
+  allowRoles("teacher"),
+  getTeacherApprovalHistory
 );
 
 router.post(
