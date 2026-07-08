@@ -8,6 +8,7 @@ import Class from "../classes/classes.model.js";
 import Section from "../sections/section.model.js";
 import Subject from "../subjects/subject.model.js";
 import User from "../users/user.model.js";
+import Timetable from "../timetables/timetable.model.js";
 
 
 /* CREATE */
@@ -124,11 +125,45 @@ export async function assignTeacher({
 export async function listAssignments({ schoolId, query }) {
   const { limit, offset } = getPagination(query);
 
+  const whereClause = {
+    school_id: schoolId,
+    is_active: true,
+  };
+
+  if (query.subject_id) whereClause.subject_id = query.subject_id;
+  if (query.class_id) whereClause.class_id = query.class_id;
+  if (query.section_id) whereClause.section_id = query.section_id;
+
+  let busyTeacherIds = [];
+  if (query.day_of_week && query.start_time && query.end_time) {
+    const overlappingTimetables = await Timetable.findAll({
+      where: {
+        school_id: schoolId,
+        day_of_week: query.day_of_week,
+        start_time: { [Op.lt]: query.end_time },
+        end_time: { [Op.gt]: query.start_time },
+        teacher_assignment_id: { [Op.ne]: null }
+      },
+      attributes: ['teacher_assignment_id']
+    });
+
+    const busyAssignmentIds = overlappingTimetables.map(t => t.teacher_assignment_id);
+
+    if (busyAssignmentIds.length > 0) {
+      const busyAssignments = await TeacherAssignment.findAll({
+        where: { id: { [Op.in]: busyAssignmentIds } },
+        attributes: ['teacher_id']
+      });
+      busyTeacherIds = busyAssignments.map(a => a.teacher_id);
+    }
+  }
+
+  if (busyTeacherIds.length > 0) {
+    whereClause.teacher_id = { [Op.notIn]: busyTeacherIds };
+  }
+
   return TeacherAssignment.findAndCountAll({
-    where: {
-      school_id: schoolId,
-      is_active: true,
-    },
+    where: whereClause,
     limit,
     offset,
     include: [
@@ -168,14 +203,35 @@ export async function getTeacherAssignments({ schoolId, teacherId }) {
   });
 }
 
-/* LIST BY SECTION */
-export async function getSectionAssignments({ schoolId, sectionId }) {
-  return TeacherAssignment.findAll({
-    where: {
-      school_id: schoolId,
-      section_id: sectionId,
-      is_active: true,
-    },
+/* LIST BY SECTION (OR GET FREE/BUSY TEACHERS) */
+export async function getSectionAssignments({ schoolId, sectionId, dayOfWeek, startTime, endTime, substituteMode }) {
+  const whereClause = {
+    school_id: schoolId,
+    section_id: sectionId,
+    is_active: true,
+  };
+
+  // 1. If not substituteMode, just return the standard section assignments
+  if (!substituteMode) {
+    return TeacherAssignment.findAll({
+      where: whereClause,
+      include: [
+        { model: Class, attributes: ["id", "class_name"] },
+        { model: Section, attributes: ["id", "name"] },
+        { model: Subject, attributes: ["id", "name"] },
+        {
+          model: Teacher,
+          attributes: ["id", "user_id"],
+          include: [{ model: User, attributes: ["id", "name", "username"] }],
+        },
+      ],
+      order: [["created_at", "DESC"]],
+    });
+  }
+
+  // 2. If substituteMode, we fetch ALL active teacher assignments for THIS section
+  const allAssignments = await TeacherAssignment.findAll({
+    where: whereClause,
     include: [
       { model: Class, attributes: ["id", "class_name"] },
       { model: Section, attributes: ["id", "name"] },
@@ -188,6 +244,73 @@ export async function getSectionAssignments({ schoolId, sectionId }) {
     ],
     order: [["created_at", "DESC"]],
   });
+
+  // Deduplicate by teacher_id so we get exactly one entry per teacher
+  const uniqueTeachers = new Map();
+  for (const assignment of allAssignments) {
+    // Optional: could prefer assignments that match the current section's subject, but first one is fine.
+    if (!uniqueTeachers.has(assignment.teacher_id)) {
+      uniqueTeachers.set(assignment.teacher_id, assignment.toJSON());
+    }
+  }
+
+  const teacherList = Array.from(uniqueTeachers.values());
+
+  // 3. Find overlapping timetables to mark teachers as busy
+  if (dayOfWeek && startTime && endTime) {
+    const overlappingTimetables = await Timetable.findAll({
+      where: {
+        school_id: schoolId,
+        day_of_week: dayOfWeek,
+        start_time: { [Op.lt]: endTime },
+        end_time: { [Op.gt]: startTime },
+        teacher_assignment_id: { [Op.ne]: null }
+      },
+      include: [
+        {
+          model: TeacherAssignment,
+          attributes: ['teacher_id'],
+        },
+        { model: Class, attributes: ["class_name"] },
+        { model: Section, attributes: ["name"] }
+      ]
+    });
+
+    const busyMap = new Map();
+    for (const tt of overlappingTimetables) {
+      if (tt.teacher_assignment && tt.teacher_assignment.teacher_id) {
+        busyMap.set(tt.teacher_assignment.teacher_id, {
+          class_name: tt.Class?.class_name,
+          section_name: tt.Section?.name,
+          start_time: tt.start_time,
+          end_time: tt.end_time
+        });
+      }
+    }
+
+    // Attach busy status
+    for (const t of teacherList) {
+      if (busyMap.has(t.teacher_id)) {
+        t.is_busy = true;
+        t.busy_details = busyMap.get(t.teacher_id);
+      } else {
+        t.is_busy = false;
+      }
+    }
+
+    // Sort: Free teachers first, busy teachers second
+    teacherList.sort((a, b) => {
+      if (a.is_busy === b.is_busy) {
+        // Alphabetical sort by teacher name if same status
+        const nameA = a.Teacher?.User?.name || "";
+        const nameB = b.Teacher?.User?.name || "";
+        return nameA.localeCompare(nameB);
+      }
+      return a.is_busy ? 1 : -1;
+    });
+  }
+
+  return teacherList;
 }
 
 /* UPDATE */

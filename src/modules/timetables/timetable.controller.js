@@ -5,6 +5,7 @@ import {
   saveTimetableService,
   getSectionTimetableService,
   getTeacherTimetableService,
+  approveTimetableService,
 } from "./timetable.service.js";
 
 /* TEACHER/ADMIN: SAVE TIMETABLE */
@@ -52,3 +53,17 @@ export const getTeacherTimetable = asyncHandler(async (req, res) => {
     data: timetable,
   });
 });
+
+/* ADMIN: APPROVE TIMETABLE */
+export const approveTimetable = asyncHandler(async (req, res) => {
+  await approveTimetableService({
+    school_id: req.user.school_id,
+    ...req.body,
+  });
+
+  res.json({
+    success: true,
+    message: "Timetable approval processed successfully",
+  });
+});
+

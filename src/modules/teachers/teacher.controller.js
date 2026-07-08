@@ -72,6 +72,9 @@ export const listTeachersBySection = asyncHandler(async (req, res) => {
 export const listTeacherOptions = asyncHandler(async (req, res) => {
   const result = await listTeacherOptionsService({
     school_id: req.user.school_id,
+    day_of_week: req.query.day_of_week,
+    start_time: req.query.start_time,
+    end_time: req.query.end_time,
   });
 
   res.json({

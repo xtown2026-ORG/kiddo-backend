@@ -9,22 +9,55 @@ import Attendance from "../attendance/attendance.model.js";
 import AppError from "../../shared/appError.js";
 import { Op } from "sequelize";
 
-const MAX_SESSION_MS = 5 * 60 * 60 * 1000; // 5 hours
+const MAX_SESSION_MS = 12 * 60 * 60 * 1000; // 12 hours fallback
 
 async function closeStaleSessions({ teacher_id, school_id }) {
-  const cutoff = new Date(Date.now() - MAX_SESSION_MS);
+  const now = new Date();
+  
+  // Format current time in Asia/Kolkata
+  const timeFormatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Kolkata",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+  const currentTimeStr = timeFormatter.format(now);
+
   const stale = await TeacherClassSession.findAll({
     where: {
       teacher_id,
       school_id,
       ended_at: null,
-      started_at: { [Op.lt]: cutoff },
     },
   });
 
   for (const s of stale) {
-    s.ended_at = new Date(s.started_at.getTime() + MAX_SESSION_MS);
-    await s.save();
+    let shouldClose = false;
+    
+    // Fallback: If session is older than 12 hours, always close it
+    if ((now - s.started_at) > MAX_SESSION_MS) {
+      shouldClose = true;
+    } else {
+      // Check timetable to determine closing time
+      let closingTime = "16:30:00";
+      if (s.timetable_id) {
+        const timetable = await Timetable.findByPk(s.timetable_id);
+        if (timetable && timetable.end_time > "16:30:00") {
+          closingTime = timetable.end_time;
+        }
+      }
+      
+      // Auto-close if we've passed the closing time
+      if (currentTimeStr >= closingTime) {
+        shouldClose = true;
+      }
+    }
+
+    if (shouldClose) {
+      s.ended_at = now;
+      await s.save();
+    }
   }
 }
 
@@ -117,19 +150,7 @@ export async function startSession({
     }
   }
 
-  // 4) Prevent parallel session
-  const existing = await TeacherClassSession.findOne({
-    where: {
-      teacher_assignment_id: assignment.id,
-      ended_at: null,
-    },
-  });
-
-  if (existing) {
-    throw new AppError("SESSION_ALREADY_RUNNING", 409);
-  }
-
-  // 5) Create session
+  // 4) Create session
   return TeacherClassSession.create({
     school_id,
     teacher_assignment_id: assignment.id,
@@ -170,12 +191,6 @@ export async function listSessions({ user, date }) {
     school_id: user.school_id,
   };
 
-  // Auto-close stale sessions before listing
-  await closeStaleSessions({
-    teacher_id: teacherId,
-    school_id: user.school_id,
-  });
-
   if (date) {
     const start = new Date(date);
     if (Number.isNaN(start.getTime())) {
@@ -185,6 +200,12 @@ export async function listSessions({ user, date }) {
     end.setDate(end.getDate() + 1);
     where.started_at = { [Op.gte]: start, [Op.lt]: end };
   }
+
+  // Auto-close stale sessions before listing
+  await closeStaleSessions({
+    teacher_id: teacherId,
+    school_id: user.school_id,
+  });
 
   const rows = await TeacherClassSession.findAll({
     where,

@@ -1,7 +1,7 @@
 import asyncHandler from "../../shared/asyncHandler.js";
+import * as service from "./teacher-assignment.service.js";
 import AppError from "../../shared/appError.js";
 import TeacherAssignment from "./teacher-assignment.model.js";
-import * as service from "./teacher-assignment.service.js";
 import { resolveTeacherId } from "../../shared/utils/resolveTeacherId.js";
 
 /* ADMIN: CREATE ASSIGNMENT */
@@ -78,6 +78,10 @@ export const getSectionAssignments = asyncHandler(async (req, res) => {
   const assignments = await service.getSectionAssignments({
     schoolId: req.user.school_id,
     sectionId: req.params.sectionId,
+    dayOfWeek: req.query.day_of_week,
+    startTime: req.query.start_time,
+    endTime: req.query.end_time,
+    substituteMode: req.query.substitute_mode === 'true'
   });
 
   res.json({
@@ -102,14 +106,13 @@ export const updateAssignment = asyncHandler(async (req, res) => {
 
 /* ADMIN: DELETE ASSIGNMENT */
 export const deleteAssignment = asyncHandler(async (req, res) => {
-  const result = await service.deleteAssignment({
+  await service.deleteAssignment({
     schoolId: req.user.school_id,
     assignmentId: req.params.id,
   });
 
   res.json({
     success: true,
-    message: result.message,
+    message: "Teacher assignment removed successfully",
   });
 });
-

@@ -10,6 +10,8 @@ import Student from "../students/student.model.js";
 import Attendance from "../attendance/attendance.model.js";
 import AITestSubmission from "../ai-test-assignments/ai-test-submission.model.js";
 import AITestAssignment from "../ai-test-assignments/ai-test-assignment.model.js";
+import Timetable from "../timetables/timetable.model.js";
+import { Op } from "sequelize";
 
 /* =========================
    ADMIN: CREATE TEACHER
@@ -144,9 +146,29 @@ export const listTeachersService = async ({ school_id, query }) => {
 /* =========================
    ADMIN: OPTIONS (DROPDOWN)
 ========================= */
-export const listTeacherOptionsService = async ({ school_id }) => {
+export const listTeacherOptionsService = async ({ school_id, day_of_week, start_time, end_time }) => {
+  let busyTeacherIds = [];
+  if (day_of_week && start_time && end_time) {
+    const overlappingTimetables = await Timetable.findAll({
+      where: {
+        school_id,
+        day_of_week,
+        start_time: { [Op.lt]: end_time },
+        end_time: { [Op.gt]: start_time },
+        teacher_assignment_id: { [Op.ne]: null }
+      },
+      include: [{ model: TeacherAssignment, required: true, attributes: ['teacher_id'] }]
+    });
+    busyTeacherIds = overlappingTimetables.map(t => t.teacher_assignment.teacher_id);
+  }
+
+  const whereClause = { school_id };
+  if (busyTeacherIds.length > 0) {
+    whereClause.id = { [Op.notIn]: busyTeacherIds };
+  }
+
   return Teacher.findAll({
-    where: { school_id },
+    where: whereClause,
     include: [
       {
         model: User,

@@ -7,11 +7,21 @@ import {
   saveTimetable,
   getSectionTimetable,
   getTeacherTimetable,
+  approveTimetable,
 } from "./timetable.controller.js";
+import { approveTimetableSchema } from "./timetable.schema.js";
 
 const router = express.Router();
 
 router.use(protect);
+
+// Admin: Approve/Reject timetable
+router.post(
+  "/approve",
+  allowRoles("school_admin"),
+  validate(approveTimetableSchema),
+  approveTimetable
+);
 
 // Admin or Teacher: Save timetable
 router.post(

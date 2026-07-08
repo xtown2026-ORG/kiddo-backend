@@ -9,6 +9,7 @@ import Subject from "../subjects/subject.model.js";
 import User from "../users/user.model.js";
 import Teacher from "../teachers/teacher.model.js";
 import AppError from "../../shared/appError.js";
+import Notification from "../notifications/notification.model.js";
 
 /* =====================================================
    CREATE / UPDATE SECTION TIMETABLE
@@ -58,16 +59,35 @@ export const saveTimetableService = async ({
     }
 
     /**
-     * 3️⃣ Remove existing timetable for that day
+     * 3️⃣ Fetch existing timetable for diffing before removal
      */
-    await Timetable.destroy({
+    const existingTimetables = await Timetable.findAll({
       where: { school_id, class_id, section_id, day_of_week },
       transaction: t,
     });
 
+    const isTeacher = user.role === "teacher";
+    const newApprovalStatus = isTeacher ? "pending" : "approved";
+
+    // Only delete existing ones if Admin is saving, OR if we are deleting previous pending requests
+    if (!isTeacher) {
+      await Timetable.destroy({
+        where: { school_id, class_id, section_id, day_of_week },
+        transaction: t,
+      });
+    } else {
+      // If teacher is saving, only delete their previous PENDING requests for this day to replace with new ones
+      await Timetable.destroy({
+        where: { school_id, class_id, section_id, day_of_week, approval_status: "pending" },
+        transaction: t,
+      });
+    }
+
     /**
-     * 4️⃣ Insert new timetable entries
+     * 4️⃣ Insert new timetable entries & Validate Availability
      */
+    const validAssignments = [];
+
     for (const e of entries) {
       if (!e.is_break && !e.teacher_assignment_id) {
         throw new AppError("ASSIGNMENT_REQUIRED", 400);
@@ -80,15 +100,56 @@ export const saveTimetableService = async ({
           where: {
             id: e.teacher_assignment_id,
             school_id,
-            class_id,
-            section_id,
             is_active: true,
           },
+          include: [
+            { model: Class, attributes: ["class_name"] },
+            { model: Subject, attributes: ["name"] }
+          ],
           transaction: t,
         });
 
         if (!assignment) {
           throw new AppError("INVALID_TEACHER_ASSIGNMENT", 400);
+        }
+
+        // Find all assignments for this teacher to check if they are busy
+        const teacherAssignments = await TeacherAssignment.findAll({
+          where: { school_id, teacher_id: assignment.teacher_id },
+          attributes: ['id'],
+          transaction: t
+        });
+        const teacherAssignmentIds = teacherAssignments.map(a => a.id);
+
+        const busy = await Timetable.findOne({
+          where: {
+            school_id,
+            day_of_week,
+            start_time: { [Op.lt]: e.end_time },
+            end_time: { [Op.gt]: e.start_time },
+            teacher_assignment_id: { [Op.in]: teacherAssignmentIds },
+            approval_status: "approved" // Only check against approved timetables
+          },
+          transaction: t
+        });
+
+        if (busy) {
+          throw new AppError("The selected teacher is no longer available for this period. Please choose another available teacher.", 400);
+        }
+        
+        // Detect if this is a new or switched assignment
+        // We only care about comparing against existing APPROVED timetables to trigger notifications
+        const existingApprovedEntry = existingTimetables.find(
+          (et) => 
+            et.start_time === e.start_time && 
+            et.end_time === e.end_time &&
+            et.approval_status === "approved"
+        );
+
+        const isSwitched = !existingApprovedEntry || String(existingApprovedEntry.teacher_assignment_id) !== String(assignment.id);
+
+        if (isSwitched) {
+          validAssignments.push({ entry: e, assignment });
         }
       }
 
@@ -103,9 +164,91 @@ export const saveTimetableService = async ({
           teacher_assignment_id: e.is_break ? null : assignment.id,
           is_break: e.is_break,
           title: e.is_break ? e.title : null,
+          approval_status: newApprovalStatus,
         },
         { transaction: t }
       );
+    }
+
+    /**
+     * 5️⃣ Send Notifications for switched assignments ONLY
+     */
+    // Only send notification if teacher is creating the request (admin doesn't need to approve their own)
+    if (isTeacher) {
+      for (const { entry, assignment } of validAssignments) {
+      const className = assignment.class?.class_name || "Unknown";
+      const subjectName = assignment.subject?.name || "Unknown";
+      const period = entry.title || "Period";
+      
+      await Notification.create({
+        school_id,
+        sender_user_id: user.id,
+        sender_role: user.role,
+        title: "Class Assignment Request",
+        message: `You have received a class assignment request for Class ${className}, Subject ${subjectName}, Period ${period}, Time ${entry.start_time} - ${entry.end_time}. Please review the request.`,
+        target_role: "teacher",
+        class_id,
+        section_id,
+      }, { transaction: t });
+
+      await Notification.create({
+        school_id,
+        sender_user_id: user.id,
+        sender_role: user.role,
+        title: "Teacher Assignment Request",
+        message: `A teacher assignment request has been created for Class ${className}, Subject ${subjectName}, Period ${period}. Awaiting approval workflow.`,
+        target_role: "school_admin",
+        class_id,
+        section_id,
+      }, { transaction: t });
+      }
+    }
+
+    return { success: true };
+  });
+};
+
+export const approveTimetableService = async ({
+  school_id,
+  class_id,
+  section_id,
+  action,
+}) => {
+  return db.transaction(async (t) => {
+    if (action === "approve") {
+      // 1. Delete all currently approved entries that have a matching pending entry
+      // For simplicity, if we are approving pending timetables, we can just delete ALL approved timetables for the days that have pending timetables
+      
+      // Find days that have pending entries
+      const pendingDays = await Timetable.findAll({
+        attributes: ['day_of_week'],
+        where: { school_id, class_id, section_id, approval_status: "pending" },
+        group: ['day_of_week'],
+        transaction: t
+      });
+      const days = pendingDays.map(p => p.day_of_week);
+
+      if (days.length > 0) {
+        await Timetable.destroy({
+          where: { school_id, class_id, section_id, day_of_week: { [Op.in]: days }, approval_status: "approved" },
+          transaction: t,
+        });
+
+        // 2. Mark pending entries as approved
+        await Timetable.update(
+          { approval_status: "approved" },
+          {
+            where: { school_id, class_id, section_id, approval_status: "pending" },
+            transaction: t,
+          }
+        );
+      }
+    } else if (action === "reject") {
+      // Just delete the pending entries
+      await Timetable.destroy({
+        where: { school_id, class_id, section_id, approval_status: "pending" },
+        transaction: t,
+      });
     }
 
     return { success: true };
@@ -122,7 +265,7 @@ export const getSectionTimetableService = async ({
   section_id,
 }) => {
   const rows = await Timetable.findAll({
-    where: { school_id, class_id, section_id },
+    where: { school_id, class_id, section_id, approval_status: "approved" },
     include: [
       {
         model: TeacherAssignment,
@@ -289,9 +432,13 @@ export const getTeacherTimetableService = async ({
 
     // Calculate status: Upcoming, Ongoing, Completed
     let status = "Upcoming";
-    if (currentTimeStr >= row.start_time && currentTimeStr <= row.end_time) {
+    
+    // Ensure sessions remain "Ongoing" until at least 16:30 for flexible attendance
+    const closingTime = row.end_time > "16:30:00" ? row.end_time : "16:30:00";
+    
+    if (currentTimeStr >= row.start_time && currentTimeStr <= closingTime) {
       status = "Ongoing";
-    } else if (currentTimeStr > row.end_time) {
+    } else if (currentTimeStr > closingTime) {
       status = "Completed";
     }
 

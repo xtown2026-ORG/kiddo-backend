@@ -37,7 +37,7 @@ const Notification = db.define(
 
     /* TARGETING */
     target_role: {
-      type: DataTypes.ENUM("teacher", "parent", "student", "all"),
+      type: DataTypes.ENUM("school_admin", "teacher", "parent", "student", "all"),
       allowNull: false,
     },
 

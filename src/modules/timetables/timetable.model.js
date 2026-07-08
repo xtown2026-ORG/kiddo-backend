@@ -65,6 +65,12 @@ const Timetable = db.define(
       allowNull: false,
       defaultValue: false,
     },
+
+    approval_status: {
+      type: DataTypes.ENUM("approved", "pending", "rejected"),
+      allowNull: false,
+      defaultValue: "approved",
+    },
   },
   {
     tableName: "timetables",

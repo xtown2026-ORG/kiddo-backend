@@ -24,3 +24,17 @@ export const saveTimetableSchema = z.object({
     )
     .min(1),
 });
+
+export const approveTimetableSchema = z.object({
+  class_id: z.number().int().positive(),
+  section_id: z.number().int().positive(),
+  day_of_week: z.enum([
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+  ]).optional(),
+  action: z.enum(["approve", "reject"]),
+});
