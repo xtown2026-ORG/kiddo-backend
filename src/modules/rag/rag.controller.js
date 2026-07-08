@@ -15,10 +15,19 @@ import {
 import Class from "../classes/classes.model.js";
 import AiChatLog from "../ai-chat-logs/ai-chat-log.model.js";
 import {
+  normalizeRequestSubject,
   resolveQuestionSubject,
+  SUBJECT_REQUIRED_RESPONSE,
   SUBJECT_MISMATCH_RESPONSE,
   validateQuestionSubject,
 } from "./subjectValidation.js";
+import { relatedQuestionService } from "../related-questions/relatedQuestion.service.js";
+import {
+  clearRelatedQuestionState,
+  findStoredRelatedQuestionSelection,
+  getStoredRelatedQuestionState,
+  storeRelatedQuestionState,
+} from "../related-questions/relatedQuestionState.js";
 
 const GEMINI_MODEL = (process.env.GEMINI_MODEL || "gemini-2.5-flash-lite").replace(/^models\//, "");
 const ai = process.env.GEMINI_API_KEY
@@ -145,6 +154,48 @@ const IMAGE_QUESTION_TEXT = "Uploaded image question";
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const IMAGE_DATA_URL_PATTERN = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/;
 const ALLOWED_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const NONE_OF_THE_ABOVE_PATTERN = /^\s*none\s+of\s+the\s+above\s*$/i;
+
+const isTruthyRequestFlag = (value) =>
+  value === true || String(value || "").trim().toLowerCase() === "true";
+
+const getRequestTextValue = (value) => {
+  if (value == null) return "";
+  if (typeof value === "string" || typeof value === "number") {
+    return String(value).trim();
+  }
+  if (Array.isArray(value)) {
+    return value.map(getRequestTextValue).find(Boolean) || "";
+  }
+  if (typeof value === "object") {
+    return getRequestTextValue(
+      value.question ??
+        value.text ??
+        value.value ??
+        value.label ??
+        value.title ??
+        value.name
+    );
+  }
+
+  return "";
+};
+
+const getFirstNonEmptyValue = (...values) =>
+  values.map(getRequestTextValue).find(Boolean) || null;
+
+const getRelatedQuestionByIndex = (questions, index) => {
+  const list = Array.isArray(questions) ? questions : [];
+  const selectedIndex = Number(index);
+  if (!Number.isInteger(selectedIndex) || selectedIndex < 0 || selectedIndex >= list.length) {
+    return null;
+  }
+
+  return getRequestTextValue(list[selectedIndex]) || null;
+};
+
+const normalizeRequestComparable = (value) =>
+  String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
 
 const findUploadedImageFile = (req) => {
   const files = req.files;
@@ -722,10 +773,19 @@ export const askQuestion = asyncHandler(async (req, res) => {
   applyNoStoreHeaders(res);
 
   const payload = req.method === "GET" ? req.query : req.body;
+  console.log("RAG_CONTROLLER_ENTRY", {
+    requestBody: req.method === "GET" ? req.query : req.body,
+    selectedSubject: payload?.selectedSubject ?? payload?.selected_subject ?? null,
+    subject: payload?.subject ?? null,
+    question: payload?.question ?? null,
+    query: payload?.query ?? null,
+  });
+
   const {
     question,
     query,
     selectedSubject,
+    selected_subject,
     subject,
     solverMode,
     classLevel,
@@ -744,18 +804,146 @@ export const askQuestion = asyncHandler(async (req, res) => {
     selected_book,
     book,
     chapter,
+    selectedQuestion,
+    selected_question,
+    selectedQuestionText,
+    selected_question_text,
+    selectedRelatedQuestion: selectedRelatedQuestionPayload,
+    selected_related_question: selected_related_questionPayload,
+    relatedQuestion,
+    related_question,
+    relatedQuestionText,
+    related_question_text,
+    selectedOption,
+    selected_option,
+    selectedAnswer,
+    selected_answer,
+    selectedIndex,
+    selected_index,
+    relatedQuestions,
+    related_questions,
+    originalQuestion,
+    original_question,
+    originalUserQuestion,
+    original_user_question,
+    initialQuestion,
+    initial_question,
+    userQuestion,
+    user_question,
+    skipRelatedQuestions,
+    skip_related_questions,
+    relatedQuestionSelected,
+    related_question_selected,
+    noneOfTheAbove,
+    none_of_the_above,
   } = payload;
 
-  const requestQuestion = question || query;
+  const rawQuestionText = getFirstNonEmptyValue(question, query);
+  const relatedQuestionState = getStoredRelatedQuestionState(req);
+  const storedSelectedRelatedQuestion = findStoredRelatedQuestionSelection(
+    relatedQuestionState,
+    rawQuestionText
+  );
+  const isStoredNoneOfTheAboveSelection = Boolean(
+    relatedQuestionState && NONE_OF_THE_ABOVE_PATTERN.test(String(rawQuestionText || ""))
+  );
+  const isStoredOriginalQuestionSelection = Boolean(
+    relatedQuestionState &&
+      rawQuestionText &&
+      normalizeRequestComparable(rawQuestionText) ===
+        normalizeRequestComparable(relatedQuestionState.originalQuestion)
+  );
+  const isStoredChangedQuestionSelection = Boolean(
+    relatedQuestionState &&
+      rawQuestionText &&
+      !isStoredNoneOfTheAboveSelection &&
+      !isStoredOriginalQuestionSelection &&
+      normalizeRequestComparable(rawQuestionText) !==
+        normalizeRequestComparable(relatedQuestionState.originalQuestion)
+  );
+  const selectedRelatedQuestion = getFirstNonEmptyValue(
+    selectedQuestion,
+    selected_question,
+    selectedQuestionText,
+    selected_question_text,
+    selectedRelatedQuestionPayload,
+    selected_related_questionPayload,
+    relatedQuestion,
+    related_question,
+    relatedQuestionText,
+    related_question_text,
+    selectedOption,
+    selected_option,
+    selectedAnswer,
+    selected_answer,
+    getRelatedQuestionByIndex(relatedQuestions || related_questions, selectedIndex ?? selected_index),
+    storedSelectedRelatedQuestion
+  );
+  const originalRelatedQuestion = getFirstNonEmptyValue(
+    originalQuestion,
+    original_question,
+    originalUserQuestion,
+    original_user_question,
+    initialQuestion,
+    initial_question,
+    userQuestion,
+    user_question,
+    isStoredNoneOfTheAboveSelection || isStoredOriginalQuestionSelection
+      ? relatedQuestionState?.originalQuestion
+      : null
+  );
+  const isNoneOfTheAboveSelection =
+    isTruthyRequestFlag(noneOfTheAbove) ||
+    isTruthyRequestFlag(none_of_the_above) ||
+    isTruthyRequestFlag(skipRelatedQuestions) ||
+    isTruthyRequestFlag(skip_related_questions) ||
+    isStoredNoneOfTheAboveSelection ||
+    isStoredOriginalQuestionSelection ||
+    NONE_OF_THE_ABOVE_PATTERN.test(String(selectedRelatedQuestion || ""));
+  const hasRelatedQuestionSelectionFlag =
+    isTruthyRequestFlag(relatedQuestionSelected) ||
+    isTruthyRequestFlag(related_question_selected) ||
+    Boolean(storedSelectedRelatedQuestion) ||
+    isStoredChangedQuestionSelection;
+  const effectiveSelectedRelatedQuestion =
+    selectedRelatedQuestion ||
+    (isStoredChangedQuestionSelection ? rawQuestionText : null) ||
+    (!isNoneOfTheAboveSelection && hasRelatedQuestionSelectionFlag
+      ? getFirstNonEmptyValue(question, query)
+      : null);
+  const hasRelatedQuestionContinuationSignal = Boolean(
+    effectiveSelectedRelatedQuestion ||
+      originalRelatedQuestion ||
+      isNoneOfTheAboveSelection ||
+      hasRelatedQuestionSelectionFlag
+  );
+  const effectiveSelectedSubject =
+    selectedSubject || selected_subject || subject || (hasRelatedQuestionContinuationSignal ? "other_subjects" : null);
+  const requestQuestion =
+    question ||
+    query ||
+    (isNoneOfTheAboveSelection ? originalRelatedQuestion : effectiveSelectedRelatedQuestion) ||
+    originalRelatedQuestion ||
+    effectiveSelectedRelatedQuestion;
   const isSolverMode = solverMode === true || solverMode === "true";
+  const normalizedSelectedSubject = normalizeRequestSubject(effectiveSelectedSubject);
+
+  if (!normalizedSelectedSubject) {
+    return res.status(400).json(SUBJECT_REQUIRED_RESPONSE);
+  }
+
   const resolvedSubject = resolveQuestionSubject({
-    question,
-    selectedSubject,
-    subject,
+    question: requestQuestion,
+    selectedSubject: effectiveSelectedSubject,
+    subject: effectiveSelectedSubject,
   });
   if (
-    question &&
-    validateQuestionSubject({ question, selectedSubject, subject }).shouldReject
+    requestQuestion &&
+    validateQuestionSubject({
+      question: requestQuestion,
+      selectedSubject: effectiveSelectedSubject,
+      subject: effectiveSelectedSubject,
+    }).shouldReject
   ) {
     return res.status(400).json(SUBJECT_MISMATCH_RESPONSE);
   }
@@ -775,7 +963,7 @@ export const askQuestion = asyncHandler(async (req, res) => {
         mimeType: uploadedFile.normalizedMimeType || uploadedFile.mimetype,
       }
     : parseImageDataPayload(payload);
-  const cleanedQuestion = requestQuestion ? stripLanguageTag(requestQuestion) : "";
+  let cleanedQuestion = requestQuestion ? stripLanguageTag(requestQuestion) : "";
 
   if (imageInput) {
     try {
@@ -811,6 +999,95 @@ export const askQuestion = asyncHandler(async (req, res) => {
 
   const taggedLanguage = extractTaggedLanguage(requestQuestion);
   let searchQuestion = stripLanguageInstructionForSearch(cleanedQuestion);
+  const shouldContinueAfterRelatedQuestions = Boolean(
+    hasRelatedQuestionContinuationSignal
+  );
+  const continuationType = isNoneOfTheAboveSelection
+    ? "none_of_the_above"
+    : shouldContinueAfterRelatedQuestions
+      ? "related_question_selection"
+      : "initial_related_questions";
+
+  if (
+    resolvedSubject.subject === "Other Subjects" &&
+    shouldContinueAfterRelatedQuestions &&
+    continuationType === "related_question_selection" &&
+    !effectiveSelectedRelatedQuestion
+  ) {
+    return res.status(400).json({
+      success: false,
+      type: "RELATED_QUESTION_SELECTION_REQUIRED",
+      message: "Selected related question is required to continue.",
+      missingField: "selectedQuestion",
+    });
+  }
+
+  if (
+    resolvedSubject.subject === "Other Subjects" &&
+    isNoneOfTheAboveSelection &&
+    !originalRelatedQuestion
+  ) {
+    return res.status(400).json({
+      success: false,
+      type: "ORIGINAL_QUESTION_REQUIRED",
+      message: "Original question is required when None of the Above is selected.",
+      missingField: "originalQuestion",
+    });
+  }
+
+  if (resolvedSubject.subject === "Other Subjects" && !shouldContinueAfterRelatedQuestions) {
+    console.log("OTHER_SUBJECTS_RELATED_QUESTION_EARLY_RETURN", {
+      reason: "initial_related_questions",
+      rawQuestionText,
+      hasStoredRelatedQuestionState: Boolean(relatedQuestionState),
+      storedOriginalQuestion: relatedQuestionState?.originalQuestion || null,
+      storedSelectedRelatedQuestion: storedSelectedRelatedQuestion || null,
+      isStoredChangedQuestionSelection,
+      isStoredOriginalQuestionSelection,
+      selectedRelatedQuestion,
+      effectiveSelectedRelatedQuestion,
+      isNoneOfTheAboveSelection,
+      shouldContinueAfterRelatedQuestions,
+    });
+    console.log("BEFORE_RELATED_QUESTION_SERVICE_GENERATE", {
+      question: cleanedQuestion,
+      selectedSubject: normalizedSelectedSubject,
+      requestQuestion,
+      classLevel,
+      book,
+      chapter,
+      sourcePath: sourcePath || source_path || null,
+      bookPath: bookPath || book_path || null,
+      currentBook: currentBook || current_book || null,
+      selectedBook: selectedBook || selected_book || null,
+      user: {
+        id: req.user?.id || null,
+        role: req.user?.role || null,
+        class_id: req.user?.class_id || null,
+        school_id: req.user?.school_id || null,
+      },
+    });
+    const questions = await relatedQuestionService.generate(cleanedQuestion);
+    storeRelatedQuestionState(req, {
+      originalQuestion: cleanedQuestion,
+      questions,
+    });
+    console.log("AFTER_RELATED_QUESTION_SERVICE_GENERATE", {
+      question: cleanedQuestion,
+      questions,
+      count: Array.isArray(questions) ? questions.length : 0,
+    });
+    return res.json({ questions });
+  }
+
+  if (resolvedSubject.subject === "Other Subjects" && shouldContinueAfterRelatedQuestions) {
+    const relatedAnswerQuestion = isNoneOfTheAboveSelection
+      ? originalRelatedQuestion || cleanedQuestion
+      : effectiveSelectedRelatedQuestion || cleanedQuestion;
+    cleanedQuestion = stripLanguageTag(relatedAnswerQuestion);
+    searchQuestion = stripLanguageInstructionForSearch(cleanedQuestion);
+  }
+
   const scopedBook =
     sourcePath ||
     source_path ||
@@ -850,11 +1127,13 @@ export const askQuestion = asyncHandler(async (req, res) => {
 
   let result;
   const detectedGeminiTextRoute = detectDirectGeminiTextRoute(cleanedQuestion);
-  const directGeminiTextRoute = resolvedSubject.source === "selected"
-    ? "selected_subject"
-    : !scopedBook || detectedGeminiTextRoute === "maths_reasoning"
-      ? detectedGeminiTextRoute
-      : null;
+  const directGeminiTextRoute = resolvedSubject.subject === "Other Subjects"
+    ? null
+    : resolvedSubject.source === "selected"
+      ? "selected_subject"
+      : !scopedBook || detectedGeminiTextRoute === "maths_reasoning"
+        ? detectedGeminiTextRoute
+        : null;
   try {
     if (directGeminiTextRoute) {
       const solverQuestion = resolvedSubject.subject
@@ -874,7 +1153,69 @@ export const askQuestion = asyncHandler(async (req, res) => {
         filters_used: `${directGeminiTextRoute}_gemini_solver`,
       };
     } else {
-      result = await routeRagQuestion({
+      if (resolvedSubject.subject === "Other Subjects" && shouldContinueAfterRelatedQuestions) {
+        console.log("OTHER_SUBJECTS_RAG_CONTINUATION", {
+          incomingContinuationPayload: {
+            question: getRequestTextValue(question),
+            query: getRequestTextValue(query),
+            selectedSubject: getRequestTextValue(selectedSubject),
+            selected_subject: getRequestTextValue(selected_subject),
+            subject: getRequestTextValue(subject),
+            selectedQuestion: getRequestTextValue(selectedQuestion),
+            selected_question: getRequestTextValue(selected_question),
+            selectedQuestionText: getRequestTextValue(selectedQuestionText),
+            selected_question_text: getRequestTextValue(selected_question_text),
+            selectedRelatedQuestion: getRequestTextValue(selectedRelatedQuestionPayload),
+            selected_related_question: getRequestTextValue(selected_related_questionPayload),
+            relatedQuestion: getRequestTextValue(relatedQuestion),
+            related_question: getRequestTextValue(related_question),
+            relatedQuestionText: getRequestTextValue(relatedQuestionText),
+            related_question_text: getRequestTextValue(related_question_text),
+            selectedOption: getRequestTextValue(selectedOption),
+            selected_option: getRequestTextValue(selected_option),
+            selectedAnswer: getRequestTextValue(selectedAnswer),
+            selected_answer: getRequestTextValue(selected_answer),
+            selectedIndex,
+            selected_index,
+            originalQuestion: getRequestTextValue(originalQuestion),
+            original_question: getRequestTextValue(original_question),
+            originalUserQuestion: getRequestTextValue(originalUserQuestion),
+            original_user_question: getRequestTextValue(original_user_question),
+            initialQuestion: getRequestTextValue(initialQuestion),
+            initial_question: getRequestTextValue(initial_question),
+            userQuestion: getRequestTextValue(userQuestion),
+            user_question: getRequestTextValue(user_question),
+            skipRelatedQuestions,
+            skip_related_questions,
+            relatedQuestionSelected,
+            related_question_selected,
+            noneOfTheAbove,
+            none_of_the_above,
+          },
+          originalQuestion: originalRelatedQuestion || null,
+          selectedRelatedQuestion: effectiveSelectedRelatedQuestion || null,
+          matchedStoredRelatedQuestion: storedSelectedRelatedQuestion || null,
+          isStoredChangedQuestionSelection,
+          hasStoredRelatedQuestionState: Boolean(relatedQuestionState),
+          effectiveRequestQuestion: cleanedQuestion,
+          effectiveSelectedSubject,
+          selectedSubject: normalizedSelectedSubject,
+          continuationType,
+          fromRelatedQuestionSelection: continuationType === "related_question_selection",
+          fromNoneOfTheAbove: continuationType === "none_of_the_above",
+          routeRagQuestionPayload: {
+            question: searchQuestion || cleanedQuestion,
+            originalQuestion: cleanedQuestion,
+            preferPreciseAnswer,
+            hasPreviousAnswer: Boolean(previousRagLog?.ai_response),
+            classLevel: effectiveClassLevel,
+            hasBookScope: Boolean(scopedBook),
+            userId: req.user?.id || null,
+          },
+        });
+      }
+
+      const routeRagQuestionPayload = {
         question: searchQuestion || cleanedQuestion,
         originalQuestion: cleanedQuestion,
         preferPreciseAnswer,
@@ -882,10 +1223,49 @@ export const askQuestion = asyncHandler(async (req, res) => {
         classLevel: effectiveClassLevel,
         bookScope: scopedBook,
         userId: req.user.id,
+      };
+
+      console.log("BEFORE_ROUTE_RAG_QUESTION", {
+        routeRagQuestionPayload,
+        selectedSubject: normalizedSelectedSubject,
+        effectiveSelectedSubject,
+        directGeminiTextRoute,
+        oldWorkingRequestShape: {
+          question: routeRagQuestionPayload.question,
+          originalQuestion: routeRagQuestionPayload.originalQuestion,
+          classLevel: routeRagQuestionPayload.classLevel,
+          bookScope: routeRagQuestionPayload.bookScope,
+          userId: routeRagQuestionPayload.userId,
+        },
       });
+
+      result = await routeRagQuestion(routeRagQuestionPayload);
+      if (resolvedSubject.subject === "Other Subjects" && shouldContinueAfterRelatedQuestions) {
+        clearRelatedQuestionState(req);
+      }
     }
   } catch (err) {
-    console.error("RAG ask failed:", err?.message || err);
+    console.error("RAG ask failed:", {
+      message: err?.message || String(err),
+      stack: err?.stack,
+      name: err?.name,
+      statusCode: err?.statusCode,
+      code: err?.code,
+    });
+
+    if (resolvedSubject.subject === "Other Subjects" && shouldContinueAfterRelatedQuestions) {
+      return res.status(err?.statusCode || 500).json({
+        success: false,
+        type: "RAG_CONTINUATION_ERROR",
+        message: err?.message || "RAG continuation failed.",
+        error: {
+          name: err?.name || null,
+          code: err?.code || null,
+          statusCode: err?.statusCode || null,
+        },
+      });
+    }
+
     result = {
       answer:
         "I could not generate an answer right now. Please try again in a moment.",

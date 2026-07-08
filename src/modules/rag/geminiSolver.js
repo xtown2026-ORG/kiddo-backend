@@ -87,29 +87,36 @@ IMPORTANT RULES:
 - DO NOT use paragraph explanations.
 - Keep each explanation to one simple student-friendly line.
 - Use Grade 6 level words in explanations.
-- Each explanation must describe only the operation used in that step.
+- Each explanation must briefly explain why the next step is used.
+- Explain variables, notation, abbreviations, formulas, and mathematical symbols the first time they appear.
 - Do not add theory notes, unrelated examples, or extra teaching paragraphs.
 - Do not use the dollar sign character anywhere in the answer.
 
 OUTPUT FORMAT:
 
 Step 1:
-[equation]
 
 Explanation:
-[one short line explaining this step]
+[one short line explaining why the next step is used]
+
+Operation:
+[equation]
 
 Step 2:
-[equation]
 
 Explanation:
-[one short line explaining this step]
+[one short line explaining why the next step is used]
+
+Operation:
+[equation]
 
 Step 3:
-[equation]
 
 Explanation:
-[one short line explaining this step]
+[one short line explaining why the next step is used]
+
+Operation:
+[equation]
 
 ...
 
@@ -129,40 +136,52 @@ RULES:
 EXAMPLE:
 
 Step 1:
+
+Explanation:
+First, write the original equation so we can solve it step by step.
+
+Operation:
 4(3x-2)+5=2(x+7)+3x
 
-Explanation:
-Original equation provided.
-
 Step 2:
+
+Explanation:
+Next, remove brackets because multiplying each term makes the equation simpler.
+
+Operation:
 12x-8+5=2x+14+3x
 
-Explanation:
-Expand the brackets on both sides.
-
 Step 3:
+
+Explanation:
+Now combine like terms because adding similar parts makes each side shorter.
+
+Operation:
 12x-3=5x+14
 
-Explanation:
-Combine the like terms.
-
 Step 4:
+
+Explanation:
+x is the unknown number, so keep x terms on one side.
+
+Operation:
 12x-5x=14+3
 
-Explanation:
-Move variable terms to one side and constants to the other side.
-
 Step 5:
+
+Explanation:
+Now subtract x terms because this leaves one x term to solve.
+
+Operation:
 7x=17
 
-Explanation:
-Subtract the variable terms.
-
 Step 6:
-x=17/7
 
 Explanation:
-Divide both sides by 7.
+Finally, divide by 7 because x is multiplied by 7.
+
+Operation:
+x=17/7
 
 Final Answer:
 x=17/7
@@ -3003,6 +3022,116 @@ const normalizeGeminiAnswer = (value) =>
     .replace(/\u200b/g, "")
     .trim();
 
+const collectUntilStepBoundary = (lines, startIndex, extraBoundaries = []) => {
+  const collected = [];
+  let index = startIndex;
+
+  while (
+    index < lines.length &&
+    !/^Step\s+\d+:?\s*$/i.test(lines[index]) &&
+    !extraBoundaries.some((pattern) => pattern.test(lines[index]))
+  ) {
+    collected.push(lines[index]);
+    index += 1;
+  }
+
+  return { text: collected.join("\n").trim(), index };
+};
+
+const formatGeminiStepPresentation = (value) => {
+  const text = String(value || "");
+  if (!/^Step\s+\d+:?/im.test(text) || !/^Explanation:/im.test(text)) {
+    return text;
+  }
+
+  const finalAnswerIndex = text.search(/^Final Answer:/im);
+  const body = finalAnswerIndex >= 0 ? text.slice(0, finalAnswerIndex).trim() : text.trim();
+  const finalAnswer = finalAnswerIndex >= 0 ? text.slice(finalAnswerIndex).trim() : "";
+  const lines = body.split("\n");
+  const blocks = [];
+  let pendingExplanation = "";
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index];
+    const explanationMatch = line.match(/^Explanation:\s*(.*)$/i);
+    if (explanationMatch) {
+      const firstLine = explanationMatch[1]?.trim();
+      const collected = collectUntilStepBoundary(lines, index + 1);
+      pendingExplanation = [firstLine, collected.text].filter(Boolean).join("\n").trim();
+      index = collected.index;
+      continue;
+    }
+
+    const stepMatch = line.match(/^Step\s+(\d+):?\s*$/i);
+    if (!stepMatch) {
+      if (!line.trim()) {
+        index += 1;
+        continue;
+      }
+      return text;
+    }
+
+    const stepNumber = stepMatch[1];
+    index += 1;
+    while (index < lines.length && !lines[index].trim()) index += 1;
+
+    let explanation = pendingExplanation;
+    let operation = "";
+    pendingExplanation = "";
+
+    const stepExplanationMatch = lines[index]?.match(/^Explanation:\s*(.*)$/i);
+    if (stepExplanationMatch) {
+      const firstLine = stepExplanationMatch[1]?.trim();
+      const collectedExplanation = collectUntilStepBoundary(lines, index + 1, [/^Operation:\s*/i]);
+      explanation = [firstLine, collectedExplanation.text].filter(Boolean).join("\n").trim();
+      index = collectedExplanation.index;
+
+      if (/^Operation:\s*/i.test(lines[index] || "")) {
+        const operationFirstLine = lines[index].replace(/^Operation:\s*/i, "").trim();
+        const collectedOperation = collectUntilStepBoundary(lines, index + 1);
+        operation = [operationFirstLine, collectedOperation.text].filter(Boolean).join("\n").trim();
+        index = collectedOperation.index;
+      } else {
+        const collectedOperation = collectUntilStepBoundary(lines, index);
+        operation = collectedOperation.text;
+        index = collectedOperation.index;
+      }
+    } else {
+      const collectedOperation = collectUntilStepBoundary(lines, index, [/^Explanation:\s*/i]);
+      operation = collectedOperation.text;
+      index = collectedOperation.index;
+
+      const trailingExplanationMatch = lines[index]?.match(/^Explanation:\s*(.*)$/i);
+      if (!explanation && trailingExplanationMatch) {
+        const firstLine = trailingExplanationMatch[1]?.trim();
+        const collectedExplanation = collectUntilStepBoundary(lines, index + 1);
+        explanation = [firstLine, collectedExplanation.text].filter(Boolean).join("\n").trim();
+        index = collectedExplanation.index;
+      }
+    }
+
+    if (!explanation || !operation) {
+      return text;
+    }
+
+    blocks.push({ stepNumber, explanation, operation });
+  }
+
+  if (!blocks.length) {
+    return text;
+  }
+
+  const formatted = blocks
+    .map(
+      ({ stepNumber, explanation, operation }) =>
+        `Step ${stepNumber}:\n\nExplanation:\n${explanation}\n\nOperation:\n${operation}`
+    )
+    .join("\n\n");
+
+  return finalAnswer ? `${formatted}\n\n${finalAnswer}` : formatted;
+};
+
 const BOOK_FALLBACK_PATTERNS = [
   /\bit\s+is\s+not\s+provided\s+in\s+the\s+book\b/i,
   /\banswer\s+not\s+found\s+in\s+(?:the\s+)?(?:book|textbook)\b/i,
@@ -3097,12 +3226,18 @@ Readability rules:
 Equation and numerical step format:
 - For algebra, equation solving, numerical, percentage, fraction, geometry, coordinate, calculus, and formula-based solving, format every mathematical step exactly like this:
 Step 1:
-<equation, formula, substitution, or calculation>
 
 Explanation:
-<one short line explaining only the operation in this step>
+<one short line explaining why this operation is used>
+
+Operation:
+<equation, formula, substitution, or calculation>
 - Continue with Step 2, Step 3, and so on.
-- Each Explanation must be one line only, short, simple, and directly related to that step.
+- Put each Explanation and Operation inside its matching Step.
+- Put only the mathematical work under Operation.
+- Each Explanation must be one sentence only, short, simple, and directly related to why the operation is used.
+- Keep each Explanation within 25 words, using simple Class 6 language.
+- Explain any variable, notation, abbreviation, formula, or mathematical symbol the first time it appears.
 - Explain operations such as moving terms, combining like terms, simplifying fractions, taking common denominators, applying formulas, substituting values, converting percentages, applying derivative or integration rules, and dividing or multiplying both sides.
 - Do not add theory paragraphs, unrelated examples, textbook-style notes, or long explanations.
 - Do not use the dollar sign character anywhere in equations, expressions, explanations, or final answers.
@@ -3185,13 +3320,15 @@ const buildGenericSubjectGeminiPrompt = ({ question, contextText }) =>
   });
 
 const IMAGE_QUESTION_SOLVER_PROMPT =
-  "You are an expert academic problem solver. Read the uploaded image carefully. The image may contain maths, physics, chemistry, accounts, commerce, table, graph, diagram, equation, or numerical problem. Answer the exact given question. Preserve all mathematical functions, scientific notation, accounting structures, tables, chemistry equations, diagrams, and subject-specific symbols. Do not rewrite the question into a different simpler equation. Solve according to the actual subject context. Generate accurate step-by-step answers and final answers. Use simple Grade 6 level words in explanations while keeping the same steps, calculations, reasoning, and final result. For simple school fill-in-the-blank questions, give the expected textbook-style answer directly without unnecessary steps. If the question asks to write a number in the International System, use commas, place-value formatting, or standard numeral grouping, only convert the number by inserting commas every 3 digits from right to left. Do not perform arithmetic, do not repeat the unformatted input, and return only the correctly formatted number with no label, formula, calculation, or explanation. For expanded form questions, remove zero-value place terms and do not write terms like 0 x 1,000, 0 x 10, + 0, or any other zero-place contribution. For Indian-number-system expanded forms, use Indian place-value grouping when helpful, such as 76,70,905 = 70,00,000 + 6,00,000 + 70,000 + 900 + 5. For place value questions, first identify the requested digit, then use the whole given number. Do not answer using only the last comma-separated group. Count Indian numbering places from right to left as Ones, Tens, Hundreds, Thousands, Ten Thousands, Lakhs, Ten Lakhs, Crores. For place value of 7 in 56,74,56,345, the final answer is 70,00,000. For face value questions, the final answer is the digit itself. Do not use Formula/Given/Substitution/Calculation format for place value or face value questions. For smallest/largest digit-number and place-value questions, keep the answer short and end with only the required value. Prefer common words such as Check instead of Determine, Find instead of Calculate, Much less instead of Significantly less, and Give a reason instead of Provide reasoning. For equation, numerical, formula-based, percentage, fraction, geometry, coordinate, or calculus solving, format every mathematical step as Step N, then the equation/formula/calculation, then Explanation:, followed by one short student-friendly line explaining only that step's operation. Do not use the dollar sign character anywhere in equations, expressions, explanations, formatted output, or final answers. Do not wrap math in dollar signs; write equations as plain readable text. Do not add long explanations, theory paragraphs, unrelated examples, or textbook-style notes. If the image is unclear, say what part is unclear instead of guessing.";
+  "You are an expert academic problem solver. Read the uploaded image carefully. The image may contain maths, physics, chemistry, accounts, commerce, table, graph, diagram, equation, or numerical problem. Answer the exact given question. Preserve all mathematical functions, scientific notation, accounting structures, tables, chemistry equations, diagrams, and subject-specific symbols. Do not rewrite the question into a different simpler equation. Solve according to the actual subject context. Generate accurate step-by-step answers and final answers. Use simple Grade 6 level words in explanations while keeping the same steps, calculations, reasoning, and final result. For simple school fill-in-the-blank questions, give the expected textbook-style answer directly without unnecessary steps. If the question asks to write a number in the International System, use commas, place-value formatting, or standard numeral grouping, only convert the number by inserting commas every 3 digits from right to left. Do not perform arithmetic, do not repeat the unformatted input, and return only the correctly formatted number with no label, formula, calculation, or explanation. For expanded form questions, remove zero-value place terms and do not write terms like 0 x 1,000, 0 x 10, + 0, or any other zero-place contribution. For Indian-number-system expanded forms, use Indian place-value grouping when helpful, such as 76,70,905 = 70,00,000 + 6,00,000 + 70,000 + 900 + 5. For place value questions, first identify the requested digit, then use the whole given number. Do not answer using only the last comma-separated group. Count Indian numbering places from right to left as Ones, Tens, Hundreds, Thousands, Ten Thousands, Lakhs, Ten Lakhs, Crores. For place value of 7 in 56,74,56,345, the final answer is 70,00,000. For face value questions, the final answer is the digit itself. Do not use Formula/Given/Substitution/Calculation format for place value or face value questions. For smallest/largest digit-number and place-value questions, keep the answer short and end with only the required value. Prefer common words such as Check instead of Determine, Find instead of Calculate, Much less instead of Significantly less, and Give a reason instead of Provide reasoning. For equation, numerical, formula-based, percentage, fraction, geometry, coordinate, or calculus solving, format every mathematical step as Step N:, then Explanation:, one short sentence explaining why the operation is used, then Operation:, then the original equation/formula/calculation. Keep each Explanation within 25 words. Explain any variable, notation, abbreviation, formula, or mathematical symbol the first time it appears. Put only mathematical work under Operation. Do not use the dollar sign character anywhere in equations, expressions, explanations, formatted output, or final answers. Do not wrap math in dollar signs; write equations as plain readable text. Do not add long explanations, theory paragraphs, unrelated examples, or textbook-style notes. If the image is unclear, say what part is unclear instead of guessing.";
 
 const extractGeminiText = (result) => {
   const text = typeof result?.text === "function" ? result.text() : result?.text;
-  return normalizeGeminiAnswer(
-    text || result?.candidates?.[0]?.content?.parts?.map((part) => part?.text || "").join("") || ""
-  );
+  return formatGeminiStepPresentation(
+    normalizeGeminiAnswer(
+      text || result?.candidates?.[0]?.content?.parts?.map((part) => part?.text || "").join("") || ""
+    )
+  ).trim();
 };
 
 const runGeminiPrompt = async (prompt, models = GEMINI_SOLVER_MODELS) => {
