@@ -3,7 +3,11 @@ import test from "node:test";
 
 import {
   detectQuestionSubject,
+  normalizeRequestSubject,
+  normalizeSelectedSubject,
   resolveQuestionSubject,
+  SUBJECT_MISMATCH_RESPONSE,
+  SUBJECT_REQUIRED_RESPONSE,
   validateQuestionSubject,
 } from "./subjectValidation.js";
 
@@ -80,6 +84,173 @@ test("allows permutation-style Maths questions without an explicit subject label
   }
 });
 
+test("selected Maths accepts common Maths questions without an explicit subject label", () => {
+  const questions = [
+    "Find the value of 45 x 28",
+    "Arrange 56, 78, 12, and 90 in descending order",
+    "How many three digit numbers can be formed using 1, 2, 3 without repetition?",
+    "What is the formula for area of a rectangle?",
+    "Define rational number",
+    "A shopkeeper sold 24 pencils in the morning and 18 pencils in the evening. How many pencils did he sell altogether?",
+  ];
+
+  for (const question of questions) {
+    const result = validateQuestionSubject({ question, selectedSubject: "Maths" });
+    assert.equal(result.detectedSubject, "Maths");
+    assert.equal(result.shouldReject, false);
+  }
+});
+
+test("rejects common Maths questions when Physics or Chemistry is selected", () => {
+  const cases = [
+    {
+      question: "Find the value of 45 x 28",
+      selectedSubject: "Physics",
+    },
+    {
+      question: "Arrange 56, 78, 12, and 90 in descending order",
+      selectedSubject: "Chemistry",
+    },
+    {
+      question: "How many three digit numbers can be formed using 1, 2, 3 without repetition?",
+      selectedSubject: "Physics",
+    },
+    {
+      question: "What is the formula for area of a rectangle?",
+      selectedSubject: "Chemistry",
+    },
+    {
+      question: "Define rational number",
+      selectedSubject: "Physics",
+    },
+    {
+      question: "A shopkeeper sold 24 pencils in the morning and 18 pencils in the evening. How many pencils did he sell altogether?",
+      selectedSubject: "Chemistry",
+    },
+  ];
+
+  for (const testCase of cases) {
+    const result = validateQuestionSubject(testCase);
+    assert.equal(result.detectedSubject, "Maths");
+    assert.equal(result.shouldReject, true);
+  }
+});
+
+test("treats digit-formation questions as Maths only", () => {
+  const question =
+    "Rajan writes a 3-digit number, using the digits 4, 7 and 9. What are the possible numbers he can write?";
+
+  assert.equal(detectQuestionSubject(question), "Maths");
+  assert.equal(
+    validateQuestionSubject({ question, selectedSubject: "Maths" }).shouldReject,
+    false
+  );
+  assert.equal(
+    validateQuestionSubject({ question, selectedSubject: "Physics" }).shouldReject,
+    true
+  );
+  assert.equal(
+    validateQuestionSubject({ question, selectedSubject: "Chemistry" }).shouldReject,
+    true
+  );
+});
+
+test("accepts valid selected-subject Gemini Solver questions", () => {
+  const cases = [
+    {
+      question: "Find the area of a triangle with base 10 cm and height 5 cm.",
+      selectedSubject: "Maths",
+    },
+    {
+      question: "A body travels with velocity 20 m/s. Find its kinetic energy.",
+      selectedSubject: "Physics",
+    },
+    {
+      question: "Calculate density when mass is 50g and volume is 10cm³.",
+      selectedSubject: "Chemistry",
+    },
+    {
+      question: "A substance has a mass of 50g and volume of 10cm³. Find density.",
+      selectedSubject: "Chemistry",
+    },
+  ];
+
+  for (const testCase of cases) {
+    const result = validateQuestionSubject(testCase);
+    assert.equal(result.shouldReject, false);
+    assert.equal(result.isMatch, true);
+  }
+});
+
+test("rejects clear cross-subject questions before Gemini Solver", () => {
+  const cases = [
+    {
+      question: "Solve x + 5 = 10.",
+      selectedSubject: "Physics",
+      detectedSubject: "Maths",
+    },
+    {
+      question: "Explain atoms and molecules.",
+      selectedSubject: "Maths",
+      detectedSubject: "Chemistry",
+    },
+    {
+      question: "Explain photosynthesis.",
+      selectedSubject: "Maths",
+      detectedSubject: "Biology",
+    },
+  ];
+
+  for (const testCase of cases) {
+    const result = validateQuestionSubject(testCase);
+    assert.equal(result.detectedSubject, testCase.detectedSubject);
+    assert.equal(result.shouldReject, true);
+    assert.equal(result.isMatch, false);
+  }
+});
+
+test("matches broad Maths Physics and Chemistry curriculum questions", () => {
+  const cases = [
+    {
+      question: "Find the derivative of sin x with respect to x.",
+      selectedSubject: "Maths",
+      detectedSubject: "Maths",
+    },
+    {
+      question: "Draw a histogram for the given class intervals and frequencies.",
+      selectedSubject: "Maths",
+      detectedSubject: "Maths",
+    },
+    {
+      question: "Calculate the equivalent resistance of two resistors connected in parallel.",
+      selectedSubject: "Physics",
+      detectedSubject: "Physics",
+    },
+    {
+      question: "Explain total internal reflection in optical fibres.",
+      selectedSubject: "Physics",
+      detectedSubject: "Physics",
+    },
+    {
+      question: "Balance the chemical equation for magnesium reacting with oxygen.",
+      selectedSubject: "Chemistry",
+      detectedSubject: "Chemistry",
+    },
+    {
+      question: "Find the empirical formula of a compound from its percentage composition.",
+      selectedSubject: "Chemistry",
+      detectedSubject: "Chemistry",
+    },
+  ];
+
+  for (const testCase of cases) {
+    const result = validateQuestionSubject(testCase);
+    assert.equal(result.detectedSubject, testCase.detectedSubject);
+    assert.equal(result.shouldReject, false);
+    assert.equal(result.isMatch, true);
+  }
+});
+
 test("button-selected subject has priority over text detection", () => {
   assert.deepEqual(
     resolveQuestionSubject({
@@ -88,6 +259,50 @@ test("button-selected subject has priority over text detection", () => {
     }),
     { subject: "Physics", source: "selected" }
   );
+});
+
+test("normalizes other_subjects and skips mismatch validation for it", () => {
+  assert.equal(normalizeSelectedSubject("other_subjects"), "Other Subjects");
+  assert.equal(normalizeSelectedSubject("Other Subjects"), "Other Subjects");
+  assert.equal(normalizeSelectedSubject("other subjects"), "Other Subjects");
+  assert.equal(normalizeRequestSubject("other_subjects"), "Other Subjects");
+  assert.equal(normalizeRequestSubject("Other Subjects"), "Other Subjects");
+  assert.equal(normalizeRequestSubject("accounts"), null);
+
+  const result = validateQuestionSubject({
+    question: "Balance H2 + O2 -> H2O",
+    selectedSubject: "other_subjects",
+  });
+
+  assert.equal(result.selectedSubject, "Other Subjects");
+  assert.equal(result.detectedSubject, "Chemistry");
+  assert.equal(result.shouldReject, false);
+  assert.equal(result.isMatch, true);
+});
+
+test("other subjects routing validation accepts fallback subject field and general questions", () => {
+  assert.deepEqual(
+    resolveQuestionSubject({
+      question: "Dr. A.P.J. Abdul Kalam",
+      selectedSubject: "",
+      subject: "other_subjects",
+    }),
+    { subject: "Other Subjects", source: "selected" }
+  );
+
+  const result = validateQuestionSubject({
+    question: "Dr. A.P.J. Abdul Kalam",
+    selectedSubject: "",
+    subject: "Other Subjects",
+  });
+
+  assert.equal(result.selectedSubject, "Other Subjects");
+  assert.equal(result.shouldReject, false);
+});
+
+test("subject validation responses use required routing messages", () => {
+  assert.equal(SUBJECT_REQUIRED_RESPONSE.message, "Please select a specific subject.");
+  assert.equal(SUBJECT_MISMATCH_RESPONSE.message, "The selected subject does not match the question.");
 });
 
 test("legacy subject field also triggers button-subject resolution", () => {

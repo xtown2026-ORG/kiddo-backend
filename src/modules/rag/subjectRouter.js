@@ -217,6 +217,16 @@ export async function routeRagQuestion({
   bookScope = null,
   userId,
 }) {
+  console.log("ROUTE_RAG_QUESTION_ENTRY", {
+    question,
+    originalQuestion,
+    preferPreciseAnswer,
+    hasPreviousAnswer: Boolean(previousAnswer),
+    classLevel,
+    bookScope,
+    userId,
+  });
+
   const equationQuestion = String(originalQuestion || question || "").trim();
   const subjectCategory = detectSubjectCategory({
     question,
