@@ -25,7 +25,10 @@ export async function protect(req, res, next) {
         }
       }
       if (identity.role === "student") {
-        const student = await Student.findOne({ where: { user_id: identity.id } });
+        const student = await Student.findOne({
+          where: { user_id: identity.id },
+          attributes: ["id", "class_id", "section_id", "school_id"],
+        });
         if (student) {
           identity.student_id = student.id;
           identity.class_id = student.class_id;
@@ -87,6 +90,7 @@ export async function protect(req, res, next) {
     if (user.role === "student") {
       const student = await Student.findOne({
         where: { user_id: user.id, school_id: user.school_id },
+        attributes: ["id", "class_id", "section_id"],
       });
       if (!student) {
         throw new AppError("Student profile not found", 401);

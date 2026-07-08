@@ -27,6 +27,22 @@ export const login = asyncHandler(async (req, res) => {
     }
   });
 
+  if (!users || users.length === 0) {
+    const school = await School.findOne({
+      where: where(fn("lower", col("school_name")), lowerLogin),
+      attributes: ["id"],
+    });
+
+    if (school) {
+      users = await User.findAll({
+        where: {
+          school_id: school.id,
+          role: "school_admin",
+        },
+      });
+    }
+  }
+
   const loginKey = String(username || "").trim().toLowerCase();
   const lockoutRecord = failedAttempts.get(loginKey);
   if (lockoutRecord) {
@@ -129,7 +145,10 @@ export const login = asyncHandler(async (req, res) => {
   if (user.role === "student") {
 
     const Student = (await import("../students/student.model.js")).default;
-    const student = await Student.findOne({ where: { user_id: user.id } });
+    const student = await Student.findOne({
+      where: { user_id: user.id },
+      attributes: ["id", "class_id", "section_id"],
+    });
 
     if (student) {
       additionalClaims = {

@@ -6,6 +6,7 @@ import multer from "multer";
 
 import {
   createSchool,
+  updateSchool,
   getSchoolDetails,
   listSchools,
   updateSchoolStatus,
@@ -17,6 +18,7 @@ import {
 
 import {
   createSchoolSchema,
+  updateSchoolSchema,
   updateSchoolStatusSchema,
   updateSchoolAdminStatusSchema,
   resetSchoolAdminPasswordSchema,
@@ -51,6 +53,7 @@ router.patch(
 router.use(protect, allowRoles("super_admin"));
 
 router.post("/", validate(createSchoolSchema), createSchool);
+router.put("/:id", validate(updateSchoolSchema), updateSchool);
 
 
 router.get("/", listSchools);

@@ -109,6 +109,109 @@ if (existingUser) {
 };
 
 /* =========================
+   SUPER ADMIN: UPDATE SCHOOL
+========================= */
+export const updateSchoolService = async ({
+  school_id,
+  name,
+  code,
+  school_type,
+  cbse_affiliation_no,
+  address,
+  city,
+  state,
+  zip,
+  email,
+  payment_mode,
+  reference_name,
+  reference_percentage,
+  admin_username,
+  admin_password,
+  logo_url,
+}) => {
+  const school = await School.findByPk(school_id);
+  if (!school) {
+    throw new AppError("School not found", 404);
+  }
+
+  const existingCode = await School.findOne({
+    where: { school_code: code },
+  });
+  if (existingCode && String(existingCode.id) !== String(school.id)) {
+    throw new AppError("School code already exists", 409);
+  }
+
+  if (school_type === "cbse" && !cbse_affiliation_no) {
+    throw new AppError(
+      "CBSE affiliation number is required for CBSE schools",
+      400
+    );
+  }
+
+  if (school_type === "state") {
+    cbse_affiliation_no = null;
+  }
+
+  await school.update({
+    school_name: name,
+    school_code: code,
+    school_type,
+    cbse_affiliation_no,
+    address,
+    city,
+    state,
+    zip,
+    email,
+    payment_mode,
+    reference_name,
+    reference_percentage,
+    logo_url,
+  });
+
+  let admin = await User.findOne({
+    where: { school_id: school.id, role: "school_admin" },
+  });
+
+  if (!admin) {
+    admin = await User.create({
+      role: "school_admin",
+      school_id: school.id,
+      username: admin_username,
+      email,
+      password: admin_password,
+      first_login: true,
+      is_active: true,
+      name: "School Admin",
+    });
+  } else {
+    const existingUser = await User.findOne({
+      where: { username: admin_username },
+    });
+
+    if (existingUser && String(existingUser.id) !== String(admin.id)) {
+      throw new AppError("Admin username already exists", 409);
+    }
+
+    const adminUpdates = {
+      username: admin_username,
+      email,
+    };
+
+    if (admin_password) {
+      adminUpdates.password = admin_password;
+      adminUpdates.first_login = true;
+    }
+
+    await admin.update(adminUpdates);
+  }
+
+  return {
+    school,
+    admin: { username: admin.username },
+  };
+};
+
+/* =========================
    SUPER ADMIN: LIST SCHOOLS
 ========================= */
 export const listSchoolsService = async ({ query }) => {

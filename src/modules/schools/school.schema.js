@@ -17,6 +17,10 @@ export const createSchoolSchema = z.object({
   admin_password: z.string().min(6),
 });
 
+export const updateSchoolSchema = createSchoolSchema.extend({
+  admin_password: z.string().min(6).optional().or(z.literal("")),
+});
+
 export const updateSchoolStatusSchema = z.object({
   status: z.enum(["pending", "active", "suspended", "expired"]),
 });

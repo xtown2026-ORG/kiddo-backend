@@ -3,6 +3,7 @@ import {
   createSchoolService,
   getSchoolDetailsService,
   listSchoolsService,
+  updateSchoolService,
   updateSchoolStatusService,
   updateSchoolAdminStatusService,
   resetSchoolAdminPasswordService,
@@ -13,6 +14,15 @@ import {
 export const createSchool = asyncHandler(async (req, res) => {
   const result = await createSchoolService(req.body);
   res.status(201).json(result);
+});
+
+/* UPDATE SCHOOL */
+export const updateSchool = asyncHandler(async (req, res) => {
+  const result = await updateSchoolService({
+    school_id: req.params.id,
+    ...req.body,
+  });
+  res.json({ message: "School updated", ...result });
 });
 
 /* LIST SCHOOLS */
