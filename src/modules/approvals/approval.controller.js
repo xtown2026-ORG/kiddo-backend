@@ -73,8 +73,16 @@ export const getAdminPendingApprovals = async (req, res, next) => {
         query: req.query,
       }),
     ]);
+    const students = await getPendingStudentApprovalsService({
+      user: req.user,
+      query: req.query,
+    });
 
     res.json({
+      students: {
+        total: students.count,
+        items: students.rows,
+      },
       teachers: {
         total: teachers.count,
         items: teachers.rows,

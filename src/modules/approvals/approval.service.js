@@ -363,9 +363,12 @@ export const getTeacherApprovalHistoryService = async ({
     ...mappedParents,
   ].sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
 
+  const requestedLimit = Number(query?.limit);
+  const limit = Number.isFinite(requestedLimit) && requestedLimit > 0 ? requestedLimit : 10;
+
   return {
     count: combined.length,
-    rows: combined.slice(0, 50),
+    rows: combined.slice(0, limit),
   };
 };
 
