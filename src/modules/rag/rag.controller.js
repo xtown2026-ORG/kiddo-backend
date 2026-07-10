@@ -1,5 +1,5 @@
 import asyncHandler from "../../shared/asyncHandler.js";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, createPartFromBase64 } from "@google/genai";
 import { routeRagQuestion } from "./subjectRouter.js";
 import {
   isEducationalFillInBlankQuestion,
@@ -151,6 +151,8 @@ const applyNoStoreHeaders = (res) => {
 };
 
 const IMAGE_QUESTION_TEXT = "Uploaded image question";
+const IMAGE_OTHER_SUBJECTS_UNSUPPORTED_MESSAGE =
+  "Image upload is supported only for Maths, Physics, and Chemistry questions. Please type your Other Subjects question instead.";
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const IMAGE_DATA_URL_PATTERN = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/;
 const ALLOWED_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
@@ -251,6 +253,154 @@ const parseImageDataPayload = (body = {}) => {
     imageBase64: imageBuffer.toString("base64"),
     mimeType: String(mimeType).toLowerCase(),
   };
+};
+
+const hasImageDataPayload = (body = {}) =>
+  Boolean(
+    body.image_data ||
+      body.imageData ||
+      body.photo_data ||
+      body.photoData ||
+      body.image_base64 ||
+      body.imageBase64 ||
+      body.questionImage ||
+      body.image ||
+      body.base64
+  );
+
+const summarizeUploadedFile = (file) =>
+  file
+    ? {
+        fieldname: file.fieldname,
+        originalname: file.originalname,
+        mimetype: file.mimetype,
+        normalizedMimeType: file.normalizedMimeType,
+        size: file.size,
+        hasBuffer: Boolean(file.buffer),
+        bufferLength: file.buffer?.length || 0,
+      }
+    : file;
+
+const summarizeUploadedFiles = (files) => {
+  if (Array.isArray(files)) {
+    return files.map(summarizeUploadedFile);
+  }
+
+  if (files && typeof files === "object") {
+    return Object.fromEntries(
+      Object.entries(files).map(([key, value]) => [
+        key,
+        Array.isArray(value) ? value.map(summarizeUploadedFile) : summarizeUploadedFile(value),
+      ])
+    );
+  }
+
+  return files;
+};
+
+const logImageRequestDebug = (req, body) => {
+  console.log("IMAGE REQUEST RECEIVED");
+  console.log("req.file:", summarizeUploadedFile(req.file));
+  console.log("req.files:", summarizeUploadedFiles(req.files));
+  console.log("req.body:", body);
+};
+
+const extractGeminiText = (result) => {
+  const text = typeof result?.text === "function" ? result.text() : result?.text;
+  return (
+    text ||
+    result?.candidates?.[0]?.content?.parts?.map((part) => part?.text || "").join("") ||
+    ""
+  );
+};
+
+const cleanExtractedImageQuestion = (value) =>
+  String(value || "")
+    .replace(/^```[\s\S]*?\n?/, "")
+    .replace(/```$/g, "")
+    .replace(/^\s*(?:question|extracted\s+question|text)\s*:\s*/i, "")
+    .trim();
+
+const extractQuestionTextFromImage = async ({ imageBase64, mimeType }) => {
+  if (!ai) {
+    throw new Error("Gemini API key is not configured");
+  }
+
+  if (!imageBase64 || !mimeType) {
+    throw new Error("Image data and MIME type are required");
+  }
+
+  const result = await ai.models.generateContent({
+    model: GEMINI_MODEL,
+    contents: [
+      {
+        role: "user",
+        parts: [
+          {
+            text: [
+              "Read the uploaded image and extract the exact academic question text.",
+              "Do not solve the question.",
+              "Do not explain anything.",
+              "Return only the readable question text from the image.",
+              "If no readable question is present, return an empty response.",
+            ].join("\n"),
+          },
+          createPartFromBase64(imageBase64, mimeType),
+        ],
+      },
+    ],
+  });
+
+  return cleanExtractedImageQuestion(extractGeminiText(result));
+};
+
+const normalizeInlineLatexToText = (value) => {
+  let text = String(value || "");
+  let previous = "";
+
+  while (text !== previous) {
+    previous = text;
+    text = text.replace(/\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, "($1) ÷ ($2)");
+  }
+
+  return text
+    .replace(/\\text\s*\{([^{}]*)\}/g, "$1")
+    .replace(/\\mathrm\s*\{([^{}]*)\}/g, "$1")
+    .replace(/\\left|\\right/g, "")
+    .replace(/\\times/g, "×")
+    .replace(/\\div/g, "÷")
+    .replace(/\\cdot/g, "×")
+    .replace(/\\pi/g, "π")
+    .replace(/\\sqrt\s*\{([^{}]*)\}/g, "√($1)")
+    .replace(/\^\{2\}/g, "²")
+    .replace(/\^2/g, "²")
+    .replace(/\^\{3\}/g, "³")
+    .replace(/\^3/g, "³")
+    .replace(/_\{([^{}]*)\}/g, "$1")
+    .replace(/\\[a-zA-Z]+/g, "")
+    .replace(/[{}]/g, "");
+};
+
+const formatImageAnswerForStudent = (answer) => {
+  const cleaned = normalizeInlineLatexToText(answer)
+    .replace(/\$\$?/g, "")
+    .replace(/\\\(|\\\)|\\\[|\\\]/g, "")
+    .replace(/\*/g, "")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  if (!cleaned) return cleaned;
+
+  const withHeading = /^Step-by-Step Solution:/i.test(cleaned)
+    ? cleaned
+    : `Step-by-Step Solution:\n\n${cleaned}`;
+
+  return withHeading
+    .replace(/\bCalculation:/gi, "Operation:")
+    .replace(/\bWork(?:ing)?:/gi, "Operation:")
+    .replace(/\bAnswer:/gi, "Final Answer:")
+    .trim();
 };
 
 const sanitizeTamilOutput = (value) => {
@@ -928,6 +1078,30 @@ export const askQuestion = asyncHandler(async (req, res) => {
   const isSolverMode = solverMode === true || solverMode === "true";
   const normalizedSelectedSubject = normalizeRequestSubject(effectiveSelectedSubject);
 
+  const uploadedFile = findUploadedImageFile(req);
+  const imageInput = uploadedFile
+    ? {
+        imageBase64: uploadedFile.buffer.toString("base64"),
+        mimeType: uploadedFile.normalizedMimeType || uploadedFile.mimetype,
+      }
+    : parseImageDataPayload(payload);
+  const hasUploadedImagePayload = Boolean(
+    uploadedFile || imageInput || hasImageDataPayload(payload)
+  );
+
+  if (hasUploadedImagePayload) {
+    logImageRequestDebug(req, payload);
+  }
+
+  if (uploadedFile) {
+    console.log("IMAGE_FILE_RECEIVED");
+  }
+
+  if (hasUploadedImagePayload && !imageInput) {
+    console.log("EARLY RETURN - Missing Image");
+    return res.status(400).json({ message: "Image is required" });
+  }
+
   if (!normalizedSelectedSubject) {
     return res.status(400).json(SUBJECT_REQUIRED_RESPONSE);
   }
@@ -945,6 +1119,9 @@ export const askQuestion = asyncHandler(async (req, res) => {
       subject: effectiveSelectedSubject,
     }).shouldReject
   ) {
+    if (hasUploadedImagePayload) {
+      console.log("EARLY RETURN - Subject Mismatch");
+    }
     return res.status(400).json(SUBJECT_MISMATCH_RESPONSE);
   }
 
@@ -952,34 +1129,58 @@ export const askQuestion = asyncHandler(async (req, res) => {
   const headerLanguage = req.headers["x-chat-language"];
   const queryLanguage = req.query.lang;
 
-  const uploadedFile = findUploadedImageFile(req);
-  if (uploadedFile) {
-    console.log("IMAGE_FILE_RECEIVED");
+  if (hasUploadedImagePayload) {
+    if (normalizedSelectedSubject === "Other Subjects") {
+      console.log("EARLY RETURN - Other Subjects");
+      return res.status(400).json({
+        message: IMAGE_OTHER_SUBJECTS_UNSUPPORTED_MESSAGE,
+      });
+    }
   }
 
-  const imageInput = uploadedFile
-    ? {
-        imageBase64: uploadedFile.buffer.toString("base64"),
-        mimeType: uploadedFile.normalizedMimeType || uploadedFile.mimetype,
-      }
-    : parseImageDataPayload(payload);
   let cleanedQuestion = requestQuestion ? stripLanguageTag(requestQuestion) : "";
 
   if (imageInput) {
     try {
+      console.log("Starting OCR...");
+      const extractedImageQuestion = await extractQuestionTextFromImage(imageInput);
+      console.log("OCR RESULT:");
+      console.log(extractedImageQuestion || null);
+      console.log("Selected Subject:", normalizedSelectedSubject);
+      console.log("Validating Subject...");
+      if (!extractedImageQuestion) {
+        console.log("EARLY RETURN - OCR Failed");
+        return res.status(400).json({
+          message: "Unable to read the uploaded image right now. Please try again.",
+        });
+      }
+      if (
+        validateQuestionSubject({
+          question: extractedImageQuestion,
+          selectedSubject: effectiveSelectedSubject,
+          subject: effectiveSelectedSubject,
+        }).shouldReject
+      ) {
+        console.log("EARLY RETURN - Subject Mismatch");
+        return res.status(400).json(SUBJECT_MISMATCH_RESPONSE);
+      }
+      const imageQuestionForSolver = extractedImageQuestion || cleanedQuestion;
+      console.log("Calling solveImageQuestionWithGemini...");
       const answer = await solveImageQuestionWithGemini({
         ...imageInput,
-        question: cleanedQuestion,
+        question: imageQuestionForSolver,
       });
+      console.log("Image Answer Generated");
       const finalAnswer =
-        answer || "I could not generate an answer from the image right now.";
+        formatImageAnswerForStudent(answer) ||
+        "I could not generate an answer from the image right now.";
 
       if (isSolverMode) {
         return res.json({ finalAnswer });
       }
 
       return res.json({
-        question: cleanedQuestion || IMAGE_QUESTION_TEXT,
+        question: imageQuestionForSolver || IMAGE_QUESTION_TEXT,
         answer: finalAnswer,
         sources: [],
         source_type: "gemini",
@@ -987,6 +1188,7 @@ export const askQuestion = asyncHandler(async (req, res) => {
       });
     } catch (err) {
       console.error("IMAGE_QUESTION_SOLVER_ERROR", err?.message || err);
+      console.log("EARLY RETURN - OCR Failed");
       return res.status(500).json({
         message: "I could not solve the uploaded image right now. Please try again in a moment.",
       });
@@ -1423,36 +1625,99 @@ export const askImageQuestion = asyncHandler(async (req, res) => {
   applyNoStoreHeaders(res);
 
   try {
+    const payload = req.body || {};
+    const effectiveSelectedSubject =
+      payload.selectedSubject || payload.selected_subject || payload.subject;
     const uploadedFile = findUploadedImageFile(req);
     const imageInput = uploadedFile
       ? {
           imageBase64: uploadedFile.buffer.toString("base64"),
           mimeType: uploadedFile.normalizedMimeType || uploadedFile.mimetype,
         }
-      : parseImageDataPayload(req.body);
+      : parseImageDataPayload(payload);
+    const hasUploadedImagePayload = Boolean(
+      uploadedFile || imageInput || hasImageDataPayload(payload)
+    );
+
+    if (hasUploadedImagePayload) {
+      logImageRequestDebug(req, payload);
+    }
 
     if (!imageInput) {
+      console.log("EARLY RETURN - Missing Image");
       return res.status(400).json({ message: "Image is required" });
+    }
+
+    const normalizedSelectedSubject = normalizeRequestSubject(effectiveSelectedSubject);
+
+    if (!normalizedSelectedSubject) {
+      return res.status(400).json(SUBJECT_REQUIRED_RESPONSE);
+    }
+
+    if (hasUploadedImagePayload && normalizedSelectedSubject === "Other Subjects") {
+      console.log("EARLY RETURN - Other Subjects");
+      return res.status(400).json({
+        message: IMAGE_OTHER_SUBJECTS_UNSUPPORTED_MESSAGE,
+      });
     }
 
     if (uploadedFile) {
       console.log("IMAGE_FILE_RECEIVED");
     }
 
+    const requestQuestion = getFirstNonEmptyValue(
+      payload.question,
+      payload.query,
+      payload.text,
+      payload.message
+    );
+
+    console.log("Starting OCR...");
+    const extractedImageQuestion = await extractQuestionTextFromImage(imageInput);
+    console.log("OCR RESULT:");
+    console.log(extractedImageQuestion || null);
+    console.log("Selected Subject:", normalizedSelectedSubject);
+    console.log("Validating Subject...");
+
+    if (!extractedImageQuestion) {
+      console.log("EARLY RETURN - OCR Failed");
+      return res.status(400).json({
+        message: "Unable to read the uploaded image right now. Please try again.",
+      });
+    }
+
+    if (
+      validateQuestionSubject({
+        question: extractedImageQuestion,
+        selectedSubject: effectiveSelectedSubject,
+        subject: effectiveSelectedSubject,
+      }).shouldReject
+    ) {
+      console.log("EARLY RETURN - Subject Mismatch");
+      return res.status(400).json(SUBJECT_MISMATCH_RESPONSE);
+    }
+
+    const imageQuestionForSolver = extractedImageQuestion || requestQuestion;
+    console.log("Calling solveImageQuestionWithGemini...");
     const answer = await solveImageQuestionWithGemini({
       ...imageInput,
-      question: req.body?.question || req.body?.text || req.body?.message,
+      question: imageQuestionForSolver,
     });
+    console.log("Image Answer Generated");
+    const finalAnswer =
+      formatImageAnswerForStudent(answer) ||
+      "I could not generate an answer from the image right now.";
 
     return res.json({
-      question: req.body?.question || IMAGE_QUESTION_TEXT,
-      answer: answer || "I could not generate an answer from the image right now.",
+      question: imageQuestionForSolver || IMAGE_QUESTION_TEXT,
+      answer: finalAnswer,
       sources: [],
       source_type: "gemini",
       filters_used: "image_gemini_solver",
     });
   } catch (err) {
     console.error("IMAGE_QUESTION_SOLVER_ERROR", err?.message || err);
+    console.log("EARLY RETURN - OCR Failed");
     return res.status(500).json({
       message: "I could not solve the uploaded image right now. Please try again in a moment.",
     });
