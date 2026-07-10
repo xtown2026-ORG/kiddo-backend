@@ -8,30 +8,39 @@ import {
 
 test("normalizes supported post-RAG explanation modes", () => {
   assert.equal(normalizePostRagExplanationMode("short"), "short");
-  assert.equal(normalizePostRagExplanationMode(" Brief "), "brief");
+  assert.equal(normalizePostRagExplanationMode(" Detail "), "detail");
+  assert.equal(normalizePostRagExplanationMode("details"), "detail");
+  assert.equal(normalizePostRagExplanationMode("detailed"), "detail");
+  assert.equal(normalizePostRagExplanationMode(" Brief "), "detail");
   assert.equal(normalizePostRagExplanationMode("long"), null);
 });
 
-test("builds a strict prompt using only the original question", () => {
+test("builds a strict short prompt using the existing answer as source", () => {
   const prompt = buildPostRagExplanationPrompt({
-    originalQuestion: "What is evaporation?",
+    question: "What is evaporation?",
+    answer: "Evaporation is the process in which water changes into water vapour.",
     mode: "short",
   });
 
-  assert.match(prompt, /Original question:\nWhat is evaporation\?/);
-  assert.match(prompt, /Never answer another question/);
-  assert.match(prompt, /Only explain the original question/);
-  assert.match(prompt, /Return 3 to 5 concise points/);
+  assert.match(prompt, /Question:\nWhat is evaporation\?/);
+  assert.match(prompt, /Existing RAG answer:\nEvaporation is the process/);
+  assert.match(prompt, /Use the existing RAG answer as the source content/);
+  assert.match(prompt, /Do not explain what the question means/);
+  assert.match(prompt, /Return 3 to 5 complete sentences/);
+  assert.match(prompt, /Simplify this answer for a 6th standard student/);
   assert.match(prompt, /Return plain text only/);
   assert.doesNotMatch(prompt, /retrieval|embedding|vector|chroma/i);
 });
 
-test("brief mode asks for progressive clear points", () => {
+test("detail mode asks for structured student-friendly points", () => {
   const prompt = buildPostRagExplanationPrompt({
-    originalQuestion: "Explain water cycle.",
-    mode: "brief",
+    question: "Explain water cycle.",
+    answer: "The water cycle is the continuous movement of water on Earth.",
+    mode: "detail",
   });
 
-  assert.match(prompt, /Return 10 to 15 clear points/);
-  assert.match(prompt, /explain progressively with logical flow/);
+  assert.match(prompt, /Expand this answer into a detailed explanation based on the given content/);
+  assert.match(prompt, /Explain the topic, not the question/);
+  assert.match(prompt, /Generate 10 to 15 structured points/);
+  assert.match(prompt, /Organize with headings and numbered points/);
 });

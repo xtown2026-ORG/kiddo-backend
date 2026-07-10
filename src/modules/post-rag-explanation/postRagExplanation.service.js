@@ -11,57 +11,84 @@ const ai = process.env.GEMINI_API_KEY
 
 const MODE_RULES = Object.freeze({
   short: {
-    pointCount: "3-5",
-    instruction: "Return 3 to 5 concise points.",
+    instruction: [
+      "Simplify this answer for a 6th standard student.",
+      "Return 3 to 5 complete sentences.",
+      "Explain the topic directly.",
+      "Keep the main meaning.",
+      "Use simple words.",
+      'Do not explain what "the question" asks.',
+      'Do not mention "the question".',
+    ],
   },
-  brief: {
-    pointCount: "10-15",
-    instruction: "Return 10 to 15 clear points that explain progressively with logical flow.",
+  detail: {
+    instruction: [
+      "Expand this answer into a detailed explanation based on the given content.",
+      "Explain the topic, not the question.",
+      "Generate 10 to 15 structured points.",
+      "Add deeper explanation about the topic.",
+      "Explain important concepts clearly.",
+      "Use simple language suitable for a 6th standard student.",
+      "Add useful context only when it is educationally relevant.",
+      "Maintain factual accuracy.",
+      "Organize with headings and numbered points.",
+      "Make the student understand the topic completely.",
+    ],
   },
 });
 
 export const normalizePostRagExplanationMode = (mode) => {
   const normalizedMode = String(mode || "").trim().toLowerCase();
+  if (normalizedMode === "brief") return "detail";
+  if (normalizedMode === "details" || normalizedMode === "detailed") return "detail";
   return MODE_RULES[normalizedMode] ? normalizedMode : null;
 };
 
-export const buildPostRagExplanationPrompt = ({ originalQuestion, mode }) => {
+export const buildPostRagExplanationPrompt = ({
+  question,
+  originalQuestion,
+  answer,
+  mode,
+}) => {
   const normalizedMode = normalizePostRagExplanationMode(mode);
   const rules = MODE_RULES[normalizedMode];
+  const cleanedQuestion = String(question || originalQuestion || "").trim();
+  const cleanedAnswer = String(answer || "").trim();
 
   if (!rules) {
     throw new Error("Invalid explanation mode.");
   }
 
   return [
-    "You are explaining the same question that the user originally asked.",
-    "Never answer another question.",
+    "You are transforming an already generated RAG answer for a student.",
+    "Use the existing RAG answer as the source content.",
+    "Do not answer the question again from your own knowledge.",
+    "Do not explain what the question means.",
+    'Do not write phrases like "this question asks" or "the question is asking".',
     "Never introduce unrelated facts.",
     "Never hallucinate.",
     "Never change the topic.",
-    "Only explain the original question.",
+    "Only transform, simplify, or expand the given answer.",
     "",
     "Safety rules:",
-    "Never generate content outside the user's original question.",
-    "Never answer a different topic.",
-    "Never infer missing topics.",
-    "If the question is ambiguous, explain only what is directly asked.",
+    "The existing answer is the source of truth.",
+    "If the answer is short, expand only what is directly supported by it.",
+    "If useful context is added, keep it clearly related and educational.",
+    "Never generate content outside the topic of the given answer.",
     "",
     `Mode: ${normalizedMode}`,
-    rules.instruction,
-    "Use simple language.",
-    "No unnecessary introduction.",
-    "No conclusion.",
+    ...rules.instruction,
     "No markdown tables.",
     "No markdown formatting.",
-    "Do not use bullet symbols or numbered list markers.",
-    "Write each point as a simple sentence on its own line.",
     "No code blocks.",
     "No unrelated information.",
     "Return plain text only.",
     "",
-    "Original question:",
-    String(originalQuestion || "").trim(),
+    "Question:",
+    cleanedQuestion,
+    "",
+    "Existing RAG answer:",
+    cleanedAnswer,
   ].join("\n");
 };
 
@@ -96,19 +123,42 @@ export const logPostRagExplanationError = (label, err) => {
   });
 };
 
-export const generatePostRagExplanation = async ({ originalQuestion, mode }) => {
+export const generatePostRagExplanation = async ({
+  question,
+  originalQuestion,
+  answer,
+  mode,
+}) => {
   try {
-    const cleanedQuestion = String(originalQuestion || "").trim();
+    const cleanedQuestion = String(question || originalQuestion || "").trim();
+    const cleanedAnswer = String(answer || "").trim();
     const normalizedMode = normalizePostRagExplanationMode(mode);
 
+    console.log("POST_RAG_EXPLANATION_SERVICE_INPUT", {
+      hasQuestion: Boolean(cleanedQuestion),
+      hasAnswer: Boolean(cleanedAnswer),
+      questionLength: cleanedQuestion.length,
+      answerLength: cleanedAnswer.length,
+      rawMode: mode,
+      normalizedMode,
+      geminiModel: GEMINI_MODEL,
+      hasGeminiApiKey: Boolean(process.env.GEMINI_API_KEY),
+    });
+
     if (!cleanedQuestion) {
-      const err = new Error("originalQuestion is required.");
+      const err = new Error("question is required.");
+      err.statusCode = 400;
+      throw err;
+    }
+
+    if (!cleanedAnswer) {
+      const err = new Error("answer is required.");
       err.statusCode = 400;
       throw err;
     }
 
     if (!normalizedMode) {
-      const err = new Error("mode must be short or brief.");
+      const err = new Error("mode must be short or detail.");
       err.statusCode = 400;
       throw err;
     }
@@ -119,15 +169,30 @@ export const generatePostRagExplanation = async ({ originalQuestion, mode }) => 
       throw err;
     }
 
+    console.log("POST_RAG_EXPLANATION_GEMINI_CALL_START", {
+      mode: normalizedMode,
+      questionLength: cleanedQuestion.length,
+      answerLength: cleanedAnswer.length,
+    });
+
     const result = await ai.models.generateContent({
       model: GEMINI_MODEL,
       contents: buildPostRagExplanationPrompt({
-        originalQuestion: cleanedQuestion,
+        question: cleanedQuestion,
+        answer: cleanedAnswer,
         mode: normalizedMode,
       }),
     });
 
-    return sanitizePlainText(extractGeminiText(result));
+    const explanation = sanitizePlainText(extractGeminiText(result));
+
+    console.log("POST_RAG_EXPLANATION_GEMINI_CALL_SUCCESS", {
+      mode: normalizedMode,
+      explanationLength: explanation.length,
+      hasExplanation: Boolean(explanation),
+    });
+
+    return explanation;
   } catch (err) {
     logPostRagExplanationError("POST_RAG_EXPLANATION_SERVICE_ERROR", err);
     throw err;
