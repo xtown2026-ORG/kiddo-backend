@@ -32,11 +32,12 @@ export const createSubject = asyncHandler(async (req, res) => {
 export const getAllSubjects = asyncHandler(async (req, res) => {
     const result = await getAllSubjectsService({
         school_id: req.user.school_id,
+        class_id: req.query.class_id,
     });
 
     res.status(200).json({
-        total: result.count,
-        items: result.rows,
+        total: result.count !== undefined ? result.count : result.length,
+        items: result.rows !== undefined ? result.rows : result,
     });
 });
 

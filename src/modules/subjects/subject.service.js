@@ -1,4 +1,5 @@
 import Subject from "./subject.model.js";
+import TeacherAssignment from "../teacher-assignments/teacher-assignment.model.js";
 
 /* =========================
    CREATE SUBJECT
@@ -36,7 +37,24 @@ export const createSubjectService = async ({
 /* =========================
    GET ALL SUBJECTS
 ========================= */
-export const getAllSubjectsService = async ({ school_id }) => {
+export const getAllSubjectsService = async ({ school_id, class_id }) => {
+    if (class_id) {
+        const assignments = await TeacherAssignment.findAll({
+            where: { school_id, class_id, is_active: true },
+            include: [{ model: Subject }],
+        });
+
+        const subjectMap = new Map();
+        assignments.forEach(a => {
+            if (a.subject && !subjectMap.has(a.subject.id)) {
+                subjectMap.set(a.subject.id, a.subject);
+            }
+        });
+
+        const rows = Array.from(subjectMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+        return { count: rows.length, rows };
+    }
+
     return Subject.findAndCountAll({
         where: { school_id },
         order: [["name", "ASC"]],

@@ -109,6 +109,7 @@ export const requestStudentProfileUpdateService = async (
     changed_fields: changedFields,
     class_id: student.class_id,
     section_id: student.section_id,
+    target_role: "teacher", // Send to teacher instead of school admin
   });
 
   return {

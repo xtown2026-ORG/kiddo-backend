@@ -1,4 +1,5 @@
 import Notification from "./notification.model.js";
+import Parent from "../parents/parent.model.js";
 
 /**
  * Generic trigger helper
@@ -10,6 +11,7 @@ const createNotification = async ({
   title,
   message,
   target_role,
+  target_user_id = null,
   class_id = null,
   section_id = null,
 }) => {
@@ -20,6 +22,7 @@ const createNotification = async ({
     title,
     message,
     target_role,
+    target_user_id,
     class_id,
     section_id,
   });
@@ -121,6 +124,7 @@ export const triggerProfileUpdateNotification = async ({
   changed_fields = [],
   class_id,
   section_id,
+  target_role = "school_admin", // Default to school admin (for teachers/parents)
 }) => {
   let userDesc = "";
   if (sender_role === "student" && student_name) userDesc = `Student ${student_name}`;
@@ -153,11 +157,77 @@ export const triggerProfileUpdateNotification = async ({
   return createNotification({
     school_id,
     sender_user_id,
-    sender_role: "school_admin", // Bypass DB ENUM restriction which only allows school_admin or teacher
+    sender_role,
     title: "Profile Update Request",
     message,
-    target_role: "teacher", 
+    target_role, 
     class_id,
     section_id,
   });
+};
+
+/* ===============================
+   ATTENDANCE MARKED
+================================ */
+export const triggerAttendanceNotification = async ({
+  school_id,
+  teacher_id,
+  subject_name,
+  class_id,
+  section_id,
+  attendanceDate,
+  records,
+  studentUserMap,
+}) => {
+  const formattedDate = attendanceDate 
+    ? new Date(attendanceDate).toLocaleDateString("en-GB") 
+    : new Date().toLocaleDateString("en-GB");
+
+  const promises = [];
+
+  for (const record of records) {
+    const rawId = Number(record.student_id);
+    const targetUserId = studentUserMap.get(rawId);
+    if (!targetUserId) continue;
+
+    // Notify Student
+    promises.push(
+      createNotification({
+        school_id,
+        sender_user_id: teacher_id,
+        sender_role: "teacher",
+        title: "Attendance Update",
+        message: `You were marked ${record.status} for ${subject_name} on ${formattedDate}.`,
+        target_role: "student",
+        target_user_id: targetUserId,
+        class_id: null,
+        section_id: null,
+      })
+    );
+
+    // Notify Parents
+    const parents = await Parent.findAll({
+      where: { student_id: rawId, approval_status: "approved" },
+    });
+
+    for (const parent of parents) {
+      if (parent.user_id) {
+        promises.push(
+          createNotification({
+            school_id,
+            sender_user_id: teacher_id,
+            sender_role: "teacher",
+            title: "Attendance Update",
+            message: `Your child was marked ${record.status} for ${subject_name} on ${formattedDate}.`,
+            target_role: "parent",
+            target_user_id: parent.user_id,
+            class_id: null,
+            section_id: null,
+          })
+        );
+      }
+    }
+  }
+
+  await Promise.all(promises);
 };

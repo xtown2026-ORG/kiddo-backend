@@ -80,6 +80,11 @@ const Teacher = db.define(
       allowNull: true,
     },
 
+    pending_updates: {
+      type: DataTypes.JSON,
+      allowNull: true,
+    },
+
     approved_at: {
       type: DataTypes.DATE,
       allowNull: true,

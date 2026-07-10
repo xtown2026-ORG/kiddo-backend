@@ -189,6 +189,7 @@ export const listStudentsForTeacherSectionService = async ({ user, query }) => {
     school_id: user.school_id,
     section_id: allowedSectionIds,
     class_id: allowedClassIds,
+    is_active: true,
   };
 
   if (query?.class_id) where.class_id = Number(query.class_id);
@@ -197,11 +198,16 @@ export const listStudentsForTeacherSectionService = async ({ user, query }) => {
   const students = await Student.findAll({
     where,
     include: [
-      { model: User, attributes: ["id", "username", "name"] },
+      { 
+        model: User, 
+        attributes: ["id", "username", "name", "is_active"],
+        where: { is_active: true },
+        required: true,
+      },
       { model: Class, attributes: ["id", "class_name"] },
       { model: Section, attributes: ["id", "name"] },
     ],
-    attributes: ["id", "class_id", "section_id", "roll_no", "admission_no"],
+    attributes: ["id", "class_id", "section_id", "roll_no", "admission_no", "is_active"],
     order: [[User, "username", "ASC"]],
   });
 

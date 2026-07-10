@@ -57,6 +57,7 @@ export const getTeacherTimetable = asyncHandler(async (req, res) => {
 /* ADMIN: APPROVE TIMETABLE */
 export const approveTimetable = asyncHandler(async (req, res) => {
   await approveTimetableService({
+    user: req.user,
     school_id: req.user.school_id,
     ...req.body,
   });

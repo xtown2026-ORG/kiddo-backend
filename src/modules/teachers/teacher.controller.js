@@ -107,6 +107,22 @@ export const completeTeacherProfile = asyncHandler(async (req, res) => {
     avatar_url,
   } = req.body;
 
+  const teacher = await Teacher.findOne({
+    where: { user_id: req.user.id },
+  });
+
+  if (!teacher) {
+    throw new AppError("Teacher profile not found", 404);
+  }
+
+  const isProfileUpdate = teacher.approval_status === "approved" && !req.user.first_login;
+
+  if (isProfileUpdate) {
+    const { requestTeacherProfileUpdateService } = await import("./teacher.approval.service.js");
+    await requestTeacherProfileUpdateService(req.user.id, req.body);
+    return res.json({ message: "Profile update request submitted", user: req.user });
+  }
+
   let user;
   const maxRetries = 1;
   let attempt = 0;
@@ -114,15 +130,6 @@ export const completeTeacherProfile = asyncHandler(async (req, res) => {
   while (attempt <= maxRetries) {
     try {
       await db.transaction(async (transaction) => {
-        const teacher = await Teacher.findOne({
-          where: { user_id: req.user.id },
-          transaction,
-        });
-
-        if (!teacher) {
-          throw new AppError("Teacher profile not found", 404);
-        }
-
         if (email) {
           const existing = await User.findOne({ where: { email }, transaction });
           if (existing && existing.id !== req.user.id) {

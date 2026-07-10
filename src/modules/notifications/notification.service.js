@@ -12,6 +12,7 @@ export const createNotificationService = async ({
   title,
   message,
   target_role,
+  target_user_id,
   class_id,
   section_id,
 }) => {
@@ -31,6 +32,7 @@ export const createNotificationService = async ({
     title,
     message,
     target_role,
+    target_user_id,
     class_id,
     section_id,
   });
@@ -48,7 +50,7 @@ export const listNotificationsForUserService = async ({
 }) => {
   const baseWhere = { school_id };
 
-  if (user_role !== "school_admin") {
+  if (user_role !== "school_admin" && user_role !== "super_admin") {
     const roleTargets = [user_role, "all"];
     const audienceFilter = { target_role: { [Op.in]: roleTargets } };
 
@@ -57,16 +59,20 @@ export const listNotificationsForUserService = async ({
     if (section_ids.length) scopeConditions.push({ section_id: { [Op.in]: section_ids } });
 
     const scopedAudienceWhere = {
-      [Op.and]: [audienceFilter, { [Op.or]: scopeConditions }],
+      [Op.and]: [
+        audienceFilter, 
+        { [Op.or]: scopeConditions },
+        { sender_user_id: { [Op.ne]: user_id } }, // Hide notifications sent by the user themselves
+        {
+          [Op.or]: [
+            { target_user_id: null },
+            { target_user_id: user_id }
+          ]
+        }
+      ],
     };
 
-    // Teachers should always see notifications they created, even if
-    // class/section scope doesn't match due assignment data gaps.
-    if (user_role === "teacher") {
-      baseWhere[Op.or] = [scopedAudienceWhere, { sender_user_id: user_id }];
-    } else {
-      baseWhere[Op.and] = [audienceFilter, { [Op.or]: scopeConditions }];
-    }
+    baseWhere[Op.and] = scopedAudienceWhere[Op.and];
   }
 
   return Notification.findAndCountAll({

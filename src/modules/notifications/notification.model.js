@@ -41,6 +41,11 @@ const Notification = db.define(
       allowNull: false,
     },
 
+    target_user_id: {
+      type: DataTypes.BIGINT,
+      allowNull: true,
+    },
+
     class_id: {
       type: DataTypes.BIGINT,
       allowNull: true, // teacher → own class, admin optional

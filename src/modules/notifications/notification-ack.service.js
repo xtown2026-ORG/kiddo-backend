@@ -9,7 +9,7 @@ export const acknowledgeNotificationService = async ({
   user_role,
   school_id,
 }) => {
-  if (!["parent", "teacher", "student"].includes(user_role)) {
+  if (!["parent", "teacher", "student", "school_admin"].includes(user_role)) {
     throw new AppError("Not allowed to acknowledge", 403);
   }
 

@@ -104,7 +104,8 @@ export const saveTimetableService = async ({
           },
           include: [
             { model: Class, attributes: ["class_name"] },
-            { model: Subject, attributes: ["name"] }
+            { model: Subject, attributes: ["name"] },
+            { model: Teacher, attributes: ["user_id"] }
           ],
           transaction: t,
         });
@@ -128,7 +129,14 @@ export const saveTimetableService = async ({
             start_time: { [Op.lt]: e.end_time },
             end_time: { [Op.gt]: e.start_time },
             teacher_assignment_id: { [Op.in]: teacherAssignmentIds },
-            approval_status: "approved" // Only check against approved timetables
+            approval_status: "approved", // Only check against approved timetables
+            // Exclude the current class and section we are modifying
+            [Op.not]: {
+              [Op.and]: [
+                { class_id },
+                { section_id }
+              ]
+            }
           },
           transaction: t
         });
@@ -171,36 +179,47 @@ export const saveTimetableService = async ({
     }
 
     /**
-     * 5️⃣ Send Notifications for switched assignments ONLY
+     * 5️⃣ Send Notifications
      */
-    // Only send notification if teacher is creating the request (admin doesn't need to approve their own)
     if (isTeacher) {
+      // Teacher is requesting a change -> notify admin for approval
       for (const { entry, assignment } of validAssignments) {
-      const className = assignment.class?.class_name || "Unknown";
-      const subjectName = assignment.subject?.name || "Unknown";
-      const period = entry.title || "Period";
-      
-      await Notification.create({
-        school_id,
-        sender_user_id: user.id,
-        sender_role: user.role,
-        title: "Class Assignment Request",
-        message: `You have received a class assignment request for Class ${className}, Subject ${subjectName}, Period ${period}, Time ${entry.start_time} - ${entry.end_time}. Please review the request.`,
-        target_role: "teacher",
-        class_id,
-        section_id,
-      }, { transaction: t });
+        const className = assignment.class?.class_name || "Unknown";
+        const subjectName = assignment.subject?.name || "Unknown";
+        const period = entry.title || "Period";
 
-      await Notification.create({
-        school_id,
-        sender_user_id: user.id,
-        sender_role: user.role,
-        title: "Teacher Assignment Request",
-        message: `A teacher assignment request has been created for Class ${className}, Subject ${subjectName}, Period ${period}. Awaiting approval workflow.`,
-        target_role: "school_admin",
-        class_id,
-        section_id,
-      }, { transaction: t });
+        await Notification.create({
+          school_id,
+          sender_user_id: user.id,
+          sender_role: user.role,
+          title: "Teacher Assignment Request",
+          message: `A teacher assignment request has been created for Class ${className}, Subject ${subjectName}, Period ${period}. Awaiting approval workflow.`,
+          target_role: "school_admin",
+          class_id,
+          section_id,
+        }, { transaction: t });
+      }
+    } else {
+      // Admin is directly modifying the timetable -> notify the new teacher
+      for (const { entry, assignment } of validAssignments) {
+        const className = assignment.class?.class_name || "Unknown";
+        const subjectName = assignment.subject?.name || "Unknown";
+        const period = entry.title || "Period";
+        const teacherUserId = assignment.teacher?.user_id;
+
+        if (teacherUserId) {
+          await Notification.create({
+            school_id,
+            sender_user_id: user.id,
+            sender_role: user.role,
+            title: "Class Assignment Update",
+            message: `You have been assigned to Class ${className}, Subject ${subjectName}, ${period} (${entry.start_time} - ${entry.end_time}).`,
+            target_role: "teacher",
+            target_user_id: teacherUserId,
+            class_id: null,
+            section_id: null,
+          }, { transaction: t });
+        }
       }
     }
 
@@ -209,6 +228,7 @@ export const saveTimetableService = async ({
 };
 
 export const approveTimetableService = async ({
+  user,
   school_id,
   class_id,
   section_id,
@@ -216,9 +236,6 @@ export const approveTimetableService = async ({
 }) => {
   return db.transaction(async (t) => {
     if (action === "approve") {
-      // 1. Delete all currently approved entries that have a matching pending entry
-      // For simplicity, if we are approving pending timetables, we can just delete ALL approved timetables for the days that have pending timetables
-      
       // Find days that have pending entries
       const pendingDays = await Timetable.findAll({
         attributes: ['day_of_week'],
@@ -229,12 +246,29 @@ export const approveTimetableService = async ({
       const days = pendingDays.map(p => p.day_of_week);
 
       if (days.length > 0) {
+        // Fetch full pending entries before updating, to trigger notifications
+        const pendingTimetables = await Timetable.findAll({
+          where: { school_id, class_id, section_id, day_of_week: { [Op.in]: days }, approval_status: "pending" },
+          include: [
+            {
+              model: TeacherAssignment,
+              include: [
+                { model: Class, attributes: ["class_name"] },
+                { model: Subject, attributes: ["name"] },
+                { model: Teacher, attributes: ["user_id"] }
+              ],
+              required: false
+            }
+          ],
+          transaction: t
+        });
+
         await Timetable.destroy({
           where: { school_id, class_id, section_id, day_of_week: { [Op.in]: days }, approval_status: "approved" },
           transaction: t,
         });
 
-        // 2. Mark pending entries as approved
+        // Mark pending entries as approved
         await Timetable.update(
           { approval_status: "approved" },
           {
@@ -242,6 +276,30 @@ export const approveTimetableService = async ({
             transaction: t,
           }
         );
+
+        // Send Notifications to the newly approved assigned teachers
+        for (const pt of pendingTimetables) {
+          if (pt.is_break || !pt.teacher_assignment) continue;
+          
+          const className = pt.teacher_assignment.class?.class_name || "Unknown";
+          const subjectName = pt.teacher_assignment.subject?.name || "Unknown";
+          const period = pt.title || "Period";
+          const teacherUserId = pt.teacher_assignment.teacher?.user_id;
+
+          if (teacherUserId) {
+            await Notification.create({
+              school_id,
+              sender_user_id: user.id,
+              sender_role: user.role,
+              title: "Timetable Request Approved",
+              message: `Your class assignment for Class ${className}, Subject ${subjectName}, ${period} (${pt.start_time} - ${pt.end_time}) has been approved.`,
+              target_role: "teacher",
+              target_user_id: teacherUserId,
+              class_id: null,
+              section_id: null,
+            }, { transaction: t });
+          }
+        }
       }
     } else if (action === "reject") {
       // Just delete the pending entries
@@ -416,10 +474,10 @@ export const getTeacherTimetableService = async ({
     });
   }
 
-  // Filter to keep only this teacher's periods and breaks/lunches
+  // Filter to keep only this teacher's periods
   const filteredRows = rows.filter((row) => {
-    if (row.is_break || !row.teacher_assignment_id) {
-      return true;
+    if (!row.teacher_assignment_id) {
+      return false; // Skip unassigned periods
     }
     const teacherIdInAssignment = row.teacher_assignment?.teacher_id;
     return teacherIds.map(String).includes(String(teacherIdInAssignment));
@@ -465,4 +523,45 @@ export const getTeacherTimetableService = async ({
   }
 
   return grouped;
+};
+
+export const getPendingTimetablesService = async ({ school_id }) => {
+  const pending = await Timetable.findAll({
+    where: { school_id, approval_status: "pending" },
+    include: [
+      { model: Class, attributes: ["id", "class_name"] },
+      { model: Section, attributes: ["id", "name"] },
+      { 
+        model: TeacherAssignment, 
+        include: [
+          { model: Teacher, include: [{ model: User, attributes: ["name", "username", "avatar_url"] }] },
+          { model: Subject, attributes: ["name"] }
+        ]
+      }
+    ],
+    order: [["created_at", "DESC"]]
+  });
+
+  // Group by day, class and section
+  const formatted = pending.map(p => ({
+    id: p.id,
+    type: "timetable",
+    created_at: p.created_at,
+    user: {
+      name: p.teacher_assignment?.teacher?.user?.name || "Teacher",
+      username: p.teacher_assignment?.teacher?.user?.username || "N/A",
+      avatar_url: p.teacher_assignment?.teacher?.user?.avatar_url || null,
+    },
+    class: p.class,
+    section: p.section,
+    start_time: p.start_time,
+    end_time: p.end_time,
+    day_of_week: p.day_of_week,
+    subject: p.teacher_assignment?.subject?.name || "Subject"
+  }));
+
+  return {
+    count: formatted.length,
+    rows: formatted
+  };
 };

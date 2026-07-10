@@ -5,6 +5,7 @@ import {
   getPendingParentApprovalsService,
   getTeacherApprovalHistoryService,
 } from "./approval.service.js";
+import { getPendingTimetablesService } from "../timetables/timetable.service.js";
 
 /* =========================
    TEACHER DASHBOARD
@@ -63,7 +64,7 @@ export const getTeacherApprovalHistory = async (req, res, next) => {
 ========================= */
 export const getAdminPendingApprovals = async (req, res, next) => {
   try {
-    const [teachers, parents] = await Promise.all([
+    const [teachers, parents, timetables] = await Promise.all([
       getPendingTeacherApprovalsService({
         user: req.user,
         query: req.query,
@@ -71,6 +72,9 @@ export const getAdminPendingApprovals = async (req, res, next) => {
       getPendingParentApprovalsService({
         user: req.user, // FIXED: school scoped
         query: req.query,
+      }),
+      getPendingTimetablesService({
+        school_id: req.user.school_id,
       }),
     ]);
     const students = await getPendingStudentApprovalsService({
@@ -90,6 +94,10 @@ export const getAdminPendingApprovals = async (req, res, next) => {
       parents: {
         total: parents.count,
         items: parents.rows,
+      },
+      timetables: {
+        total: timetables.count,
+        items: timetables.rows,
       },
     });
   } catch (e) {

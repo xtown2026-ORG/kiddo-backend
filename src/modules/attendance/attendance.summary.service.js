@@ -9,6 +9,10 @@ import AppError from "../../shared/appError.js";
 import { getPagination } from "../../shared/utils/pagination.js";
 import TeacherClassSession from "../teacher-class-sessions/teacher-class-session.model.js";
 import { listApprovedParentLinks } from "../parents/parent.family.service.js";
+import { triggerAttendanceNotification } from "../notifications/notification-trigger.service.js";
+import Timetable from "../timetables/timetable.model.js";
+import Subject from "../subjects/subject.model.js";
+import TeacherAssignment from "../teacher-assignments/teacher-assignment.model.js";
 
 /* =========================
    TEACHER: MARK ATTENDANCE
@@ -28,10 +32,30 @@ export const markAttendanceService = async ({
       id: normalizedSessionId,
       school_id,
     },
+    include: [
+      {
+        model: TeacherAssignment,
+        include: [{ model: Subject, required: false }],
+        required: false,
+      },
+    ],
   });
 
   if (!session) {
     throw new AppError("SESSION_NOT_ACTIVE", 400);
+  }
+
+  if (session.ended_at) {
+    throw new AppError("Attendance Saved / Closed", 400);
+  }
+
+  // Prevent duplicate submissions for the same period
+  const existingAttendanceCount = await Attendance.count({
+    where: { teacher_class_session_id: normalizedSessionId },
+  });
+
+  if (existingAttendanceCount > 0) {
+    throw new AppError("Attendance Already Submitted", 400);
   }
 
   if (user.role === "teacher" && Number(session.teacher_id) !== normalizedTeacherId) {
@@ -64,11 +88,18 @@ export const markAttendanceService = async ({
     : [];
 
   const studentIdMap = new Map();
+  const studentUserMap = new Map();
   for (const student of enrolledStudents) {
     const sid = Number(student.id);
     const uid = Number(student.user_id);
-    if (Number.isInteger(sid) && sid > 0) studentIdMap.set(sid, sid);
-    if (Number.isInteger(uid) && uid > 0) studentIdMap.set(uid, sid);
+    if (Number.isInteger(sid) && sid > 0) {
+      studentIdMap.set(sid, sid);
+      studentUserMap.set(sid, uid);
+    }
+    if (Number.isInteger(uid) && uid > 0) {
+      studentIdMap.set(uid, sid);
+      studentUserMap.set(uid, uid);
+    }
   }
 
   let saved = 0;
@@ -99,6 +130,23 @@ export const markAttendanceService = async ({
   if (saved === 0) {
     throw new AppError("No valid students found for this class session", 400);
   }
+
+  // 1. Auto-end the session so the next period becomes available
+  session.ended_at = new Date();
+  await session.save();
+
+  // 2. Trigger individual attendance notifications
+  const subjectName = session.teacher_assignment?.subject?.name || "the scheduled class";
+  await triggerAttendanceNotification({
+    school_id,
+    teacher_id: normalizedTeacherId,
+    subject_name: subjectName,
+    class_id: session.class_id,
+    section_id: session.section_id,
+    attendanceDate,
+    records,
+    studentUserMap,
+  });
 
   return {
     message: "Attendance marked successfully",

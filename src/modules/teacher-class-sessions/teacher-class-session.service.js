@@ -6,6 +6,7 @@ import Class from "../classes/classes.model.js";
 import Section from "../sections/section.model.js";
 import Student from "../students/student.model.js";
 import Attendance from "../attendance/attendance.model.js";
+import User from "../users/user.model.js";
 import AppError from "../../shared/appError.js";
 import { Op } from "sequelize";
 
@@ -139,7 +140,6 @@ export async function startSession({
       timetable = await Timetable.findOne({
         where: {
           id: timetable_id,
-          teacher_assignment_id: assignment.id,
           school_id,
         },
       });
@@ -232,20 +232,79 @@ export async function listSessions({ user, date }) {
   const attendanceCounts = await Attendance.findAll({
     attributes: [
       "teacher_class_session_id",
+      "status",
       [Attendance.sequelize.fn("COUNT", "*"), "count"],
     ],
     where: { teacher_class_session_id: sessionIds },
-    group: ["teacher_class_session_id"],
+    group: ["teacher_class_session_id", "status"],
     raw: true,
   });
-  const attendanceMap = new Map(attendanceCounts.map((c) => [String(c.teacher_class_session_id), Number(c.count)]));
+
+  const attendanceMap = new Map();
+  for (const c of attendanceCounts) {
+    const sid = String(c.teacher_class_session_id);
+    if (!attendanceMap.has(sid)) {
+      attendanceMap.set(sid, { total: 0, present: 0, absent: 0 });
+    }
+    const stat = attendanceMap.get(sid);
+    const count = Number(c.count);
+    stat.total += count;
+    if (c.status === "present" || c.status === "on_duty") stat.present += count;
+    else if (c.status === "absent" || c.status === "leave") stat.absent += count;
+  }
+
+  const attendanceRecords = await Attendance.findAll({
+    where: {
+      teacher_class_session_id: sessionIds,
+    },
+    include: [
+      {
+        model: Student,
+        attributes: ["id"],
+        include: [
+          {
+            model: User,
+            attributes: ["name", "username"],
+          },
+        ],
+      },
+    ],
+  });
+
+  const absentMap = new Map();
+  const presentMap = new Map();
+
+  for (const r of attendanceRecords) {
+    const sid = String(r.teacher_class_session_id);
+    if (!absentMap.has(sid)) absentMap.set(sid, []);
+    if (!presentMap.has(sid)) presentMap.set(sid, []);
+    
+    // Safely check uppercase/lowercase associations
+    const st = r.Student || r.student;
+    const usr = st?.User || st?.user;
+    const studentName = usr?.name || st?.name || usr?.username || "Unknown Student";
+    
+    const studentData = {
+      id: r.student_id,
+      name: studentName,
+    };
+
+    if (r.status === "absent" || r.status === "leave") {
+      absentMap.get(sid).push(studentData);
+    } else if (r.status === "present" || r.status === "on_duty") {
+      presentMap.get(sid).push(studentData);
+    }
+  }
 
   const results = await Promise.all(
     rows.map(async (r) => {
       const expected = r.section_id
         ? await attendanceExpectedCache(r.section_id, r.class_id, r.school_id)
         : 0;
-      const marked = attendanceMap.get(String(r.id)) || 0;
+      const markedStats = attendanceMap.get(String(r.id)) || { total: 0, present: 0, absent: 0 };
+      const marked = markedStats.total;
+      const absentStudents = absentMap.get(String(r.id)) || [];
+      const presentStudents = presentMap.get(String(r.id)) || [];
 
       return {
         id: r.id,
@@ -260,6 +319,10 @@ export async function listSessions({ user, date }) {
         timetable_id: r.timetable_id,
         attendance_expected: expected,
         attendance_marked: marked,
+        present_count: markedStats.present,
+        absent_count: markedStats.absent,
+        absent_students: absentStudents,
+        present_students: presentStudents,
         attendance_complete: expected > 0 ? marked >= expected : false,
         timetable: r.timetable
           ? {
@@ -275,20 +338,21 @@ export async function listSessions({ user, date }) {
   return results;
 }
 
-// simple cache for expected student count per section
-const expectedCache = new Map();
-
 async function attendanceExpectedCache(section_id, class_id, school_id) {
-  const key = `${school_id}-${class_id}-${section_id}`;
-  if (expectedCache.has(key)) return expectedCache.get(key);
-  const count = await Student.count({
+  // Always query database dynamically to ensure accurate student count
+  return Student.count({
     where: {
       school_id,
       class_id,
       section_id,
       is_active: true,
     },
+    include: [
+      {
+        model: User,
+        where: { is_active: true },
+        required: true,
+      },
+    ],
   });
-  expectedCache.set(key, count);
-  return count;
 }
