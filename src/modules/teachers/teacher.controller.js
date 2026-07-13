@@ -12,6 +12,7 @@ import {
 } from "./teacher.service.js";
 import Teacher from "./teacher.model.js";
 import User from "../users/user.model.js";
+import { triggerNewProfileNotification } from "../notifications/notification-trigger.service.js";
 
 const RETRYABLE_DB_CODES = new Set(["57P03", "57P01", "08006", "08001"]);
 
@@ -201,6 +202,18 @@ export const completeTeacherProfile = asyncHandler(async (req, res) => {
     { expiresIn: process.env.JWT_EXPIRES_IN || "7d" }
   );
 
+  // Send notification to school admin
+  try {
+    await triggerNewProfileNotification({
+      school_id: user.school_id,
+      sender_user_id: user.id,
+      sender_role: "teacher",
+      user_name: user.name,
+    });
+  } catch (notifErr) {
+    console.error("Failed to send notification:", notifErr);
+  }
+
   res.json({ message: "Profile completed", token, user });
 });
 
@@ -208,7 +221,7 @@ export const completeTeacherProfile = asyncHandler(async (req, res) => {
 export const getMyProfile = asyncHandler(async (req, res) => {
   const teacher = await Teacher.findOne({
     where: { user_id: req.user.id },
-    include: ["user"],
+    include: [User],
   });
 
   if (!teacher) {

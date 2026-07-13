@@ -167,6 +167,29 @@ export const triggerProfileUpdateNotification = async ({
 };
 
 /* ===============================
+   NEW PROFILE REGISTRATION
+================================ */
+export const triggerNewProfileNotification = async ({
+  school_id,
+  sender_user_id,
+  sender_role,
+  user_name,
+}) => {
+  let userDesc = "";
+  if (user_name) userDesc = `${sender_role.charAt(0).toUpperCase() + sender_role.slice(1)} ${user_name}`;
+  else userDesc = `A new ${sender_role}`;
+
+  return createNotification({
+    school_id,
+    sender_user_id,
+    sender_role,
+    title: "New Registration Pending",
+    message: `${userDesc} has completed their profile and is waiting for approval.`,
+    target_role: "school_admin",
+  });
+};
+
+/* ===============================
    ATTENDANCE MARKED
 ================================ */
 export const triggerAttendanceNotification = async ({

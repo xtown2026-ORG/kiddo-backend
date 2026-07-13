@@ -89,7 +89,7 @@ export const login = asyncHandler(async (req, res) => {
         throw new AppError("Too many wrong password attempts. Please contact your admin.", 403);
       }
       failedAttempts.set(loginKey, record);
-      throw new AppError("Invalid email/username/phone or password.", 401);
+      throw new AppError("Invalid username or password.", 401);
     }
   }
 
@@ -104,7 +104,7 @@ export const login = asyncHandler(async (req, res) => {
       throw new AppError("Too many wrong password attempts. Please contact your admin.", 403);
     }
     failedAttempts.set(loginKey, record);
-    throw new AppError("Invalid email/username/phone or password.", 401);
+    throw new AppError("Invalid username or password.", 401);
   }
 
   failedAttempts.delete(loginKey);

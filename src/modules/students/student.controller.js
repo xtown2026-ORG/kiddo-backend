@@ -14,6 +14,7 @@ import {
 import Student from "./student.model.js";
 import User from "../users/user.model.js";
 import Parent from "../parents/parent.model.js";
+import { triggerNewProfileNotification } from "../notifications/notification-trigger.service.js";
 
 /* ADMIN: AUTO CREATE */
 export const createStudent = asyncHandler(async (req, res) => {
@@ -156,6 +157,18 @@ export const completeStudentProfile = asyncHandler(async (req, res) => {
     process.env.JWT_SECRET,
     { expiresIn: process.env.JWT_EXPIRES_IN || "7d" }
   );
+
+  // Send notification to school admin
+  try {
+    await triggerNewProfileNotification({
+      school_id: req.user.school_id,
+      sender_user_id: req.user.id,
+      sender_role: "student",
+      user_name: req.user.name,
+    });
+  } catch (notifErr) {
+    console.error("Failed to send notification:", notifErr);
+  }
 
   res.json({ message: "Profile completed", token, user: req.user });
 });
