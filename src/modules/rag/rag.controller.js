@@ -1,5 +1,5 @@
 import asyncHandler from "../../shared/asyncHandler.js";
-import { GoogleGenAI, createPartFromBase64 } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 import { routeRagQuestion } from "./subjectRouter.js";
 import {
   isEducationalFillInBlankQuestion,
@@ -305,54 +305,23 @@ const logImageRequestDebug = (req, body) => {
   console.log("req.body:", body);
 };
 
-const extractGeminiText = (result) => {
-  const text = typeof result?.text === "function" ? result.text() : result?.text;
-  return (
-    text ||
-    result?.candidates?.[0]?.content?.parts?.map((part) => part?.text || "").join("") ||
-    ""
-  );
-};
+const buildImageSubjectGuardQuestion = ({ question, selectedSubject }) =>
+  [
+    `Selected subject: ${selectedSubject}.`,
+    "Before solving the uploaded image, determine the primary academic subject of the question.",
+    "If the primary subject does not match the selected subject, return exactly:",
+    SUBJECT_MISMATCH_RESPONSE.message,
+    "Do not solve the question when the subject does not match.",
+    "If the subject matches, solve the uploaded question normally.",
+    question ? `User question/instruction: ${question}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
 
-const cleanExtractedImageQuestion = (value) =>
-  String(value || "")
-    .replace(/^```[\s\S]*?\n?/, "")
-    .replace(/```$/g, "")
-    .replace(/^\s*(?:question|extracted\s+question|text)\s*:\s*/i, "")
-    .trim();
-
-const extractQuestionTextFromImage = async ({ imageBase64, mimeType }) => {
-  if (!ai) {
-    throw new Error("Gemini API key is not configured");
-  }
-
-  if (!imageBase64 || !mimeType) {
-    throw new Error("Image data and MIME type are required");
-  }
-
-  const result = await ai.models.generateContent({
-    model: GEMINI_MODEL,
-    contents: [
-      {
-        role: "user",
-        parts: [
-          {
-            text: [
-              "Read the uploaded image and extract the exact academic question text.",
-              "Do not solve the question.",
-              "Do not explain anything.",
-              "Return only the readable question text from the image.",
-              "If no readable question is present, return an empty response.",
-            ].join("\n"),
-          },
-          createPartFromBase64(imageBase64, mimeType),
-        ],
-      },
-    ],
-  });
-
-  return cleanExtractedImageQuestion(extractGeminiText(result));
-};
+const isSubjectMismatchAnswer = (answer) =>
+  String(answer || "")
+    .trim()
+    .replace(/^["']|["']$/g, "") === SUBJECT_MISMATCH_RESPONSE.message;
 
 const normalizeInlineLatexToText = (value) => {
   let text = String(value || "");
@@ -1142,34 +1111,22 @@ export const askQuestion = asyncHandler(async (req, res) => {
 
   if (imageInput) {
     try {
-      console.log("Starting OCR...");
-      const extractedImageQuestion = await extractQuestionTextFromImage(imageInput);
-      console.log("OCR RESULT:");
-      console.log(extractedImageQuestion || null);
-      console.log("Selected Subject:", normalizedSelectedSubject);
-      console.log("Validating Subject...");
-      if (!extractedImageQuestion) {
-        console.log("EARLY RETURN - OCR Failed");
-        return res.status(400).json({
-          message: "Unable to read the uploaded image right now. Please try again.",
-        });
-      }
-      if (
-        validateQuestionSubject({
-          question: extractedImageQuestion,
-          selectedSubject: effectiveSelectedSubject,
-          subject: effectiveSelectedSubject,
-        }).shouldReject
-      ) {
-        console.log("EARLY RETURN - Subject Mismatch");
-        return res.status(400).json(SUBJECT_MISMATCH_RESPONSE);
-      }
-      const imageQuestionForSolver = extractedImageQuestion || cleanedQuestion;
+      const imageQuestionForSolver = buildImageSubjectGuardQuestion({
+        question: cleanedQuestion,
+        selectedSubject: normalizedSelectedSubject,
+      });
+      console.log(`SELECTED_SUBJECT = ${normalizedSelectedSubject || "Unknown"}`);
       console.log("Calling solveImageQuestionWithGemini...");
       const answer = await solveImageQuestionWithGemini({
         ...imageInput,
         question: imageQuestionForSolver,
       });
+      if (isSubjectMismatchAnswer(answer)) {
+        console.log("IMAGE_VALIDATION_RESULT = MISMATCH");
+        console.log("EARLY RETURN - Subject Mismatch");
+        return res.status(400).json(SUBJECT_MISMATCH_RESPONSE);
+      }
+      console.log("IMAGE_VALIDATION_RESULT = MATCH");
       console.log("Image Answer Generated");
       const finalAnswer =
         formatImageAnswerForStudent(answer) ||
@@ -1180,7 +1137,7 @@ export const askQuestion = asyncHandler(async (req, res) => {
       }
 
       return res.json({
-        question: imageQuestionForSolver || IMAGE_QUESTION_TEXT,
+        question: cleanedQuestion || IMAGE_QUESTION_TEXT,
         answer: finalAnswer,
         sources: [],
         source_type: "gemini",
@@ -1672,44 +1629,29 @@ export const askImageQuestion = asyncHandler(async (req, res) => {
       payload.message
     );
 
-    console.log("Starting OCR...");
-    const extractedImageQuestion = await extractQuestionTextFromImage(imageInput);
-    console.log("OCR RESULT:");
-    console.log(extractedImageQuestion || null);
-    console.log("Selected Subject:", normalizedSelectedSubject);
-    console.log("Validating Subject...");
-
-    if (!extractedImageQuestion) {
-      console.log("EARLY RETURN - OCR Failed");
-      return res.status(400).json({
-        message: "Unable to read the uploaded image right now. Please try again.",
-      });
-    }
-
-    if (
-      validateQuestionSubject({
-        question: extractedImageQuestion,
-        selectedSubject: effectiveSelectedSubject,
-        subject: effectiveSelectedSubject,
-      }).shouldReject
-    ) {
-      console.log("EARLY RETURN - Subject Mismatch");
-      return res.status(400).json(SUBJECT_MISMATCH_RESPONSE);
-    }
-
-    const imageQuestionForSolver = extractedImageQuestion || requestQuestion;
+    const imageQuestionForSolver = buildImageSubjectGuardQuestion({
+      question: requestQuestion,
+      selectedSubject: normalizedSelectedSubject,
+    });
+    console.log(`SELECTED_SUBJECT = ${normalizedSelectedSubject || "Unknown"}`);
     console.log("Calling solveImageQuestionWithGemini...");
     const answer = await solveImageQuestionWithGemini({
       ...imageInput,
       question: imageQuestionForSolver,
     });
+    if (isSubjectMismatchAnswer(answer)) {
+      console.log("IMAGE_VALIDATION_RESULT = MISMATCH");
+      console.log("EARLY RETURN - Subject Mismatch");
+      return res.status(400).json(SUBJECT_MISMATCH_RESPONSE);
+    }
+    console.log("IMAGE_VALIDATION_RESULT = MATCH");
     console.log("Image Answer Generated");
     const finalAnswer =
       formatImageAnswerForStudent(answer) ||
       "I could not generate an answer from the image right now.";
 
     return res.json({
-      question: imageQuestionForSolver || IMAGE_QUESTION_TEXT,
+      question: requestQuestion || IMAGE_QUESTION_TEXT,
       answer: finalAnswer,
       sources: [],
       source_type: "gemini",
