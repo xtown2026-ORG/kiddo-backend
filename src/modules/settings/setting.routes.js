@@ -3,6 +3,7 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { getGlobalSettings, updateGlobalLogo, updateGlobalSettings } from "./setting.controller.js";
+import { protect, authorize } from "../../shared/middlewares/auth.js";
 
 const router = express.Router();
 
@@ -36,7 +37,7 @@ const upload = multer({
 });
 
 router.get("/", getGlobalSettings);
-router.post("/logo", upload.single("logo"), updateGlobalLogo);
-router.put("/", updateGlobalSettings);
+router.post("/logo", protect, authorize("super_admin"), upload.single("logo"), updateGlobalLogo);
+router.put("/", protect, authorize("super_admin"), updateGlobalSettings);
 
 export default router;

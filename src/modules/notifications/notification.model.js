@@ -60,6 +60,26 @@ const Notification = db.define(
       type: DataTypes.BOOLEAN,
       defaultValue: true,
     },
+
+    category: {
+      type: DataTypes.ENUM(
+        "Attendance", "Homework", "Diary", "Exam", "Fees", "Leave", 
+        "Circular", "Announcement", "Event", "Profile Update", "General", "System"
+      ),
+      allowNull: false,
+      defaultValue: "General",
+    },
+
+    priority_level: {
+      type: DataTypes.ENUM("Low", "Medium", "High", "Critical"),
+      allowNull: false,
+      defaultValue: "Low",
+    },
+
+    module_reference: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
   },
   {
     tableName: "notifications",

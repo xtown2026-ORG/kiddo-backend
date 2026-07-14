@@ -202,3 +202,25 @@ export const changePassword = asyncHandler(async (req, res) => {
     message: "Password updated successfully",
   });
 });
+
+export const uploadProfileImage = asyncHandler(async (req, res) => {
+  if (!req.file) {
+    throw new AppError("No profile image provided", 400);
+  }
+
+  const user = await User.findByPk(req.user.id);
+  if (!user) {
+    throw new AppError("User not found", 404);
+  }
+
+  const avatarUrl = `/uploads/profile-images/${req.file.filename}`;
+  
+  user.avatar_url = avatarUrl;
+  await user.save();
+
+  res.json({
+    success: true,
+    message: "Profile image updated successfully",
+    avatar_url: avatarUrl,
+  });
+});

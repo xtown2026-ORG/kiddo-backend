@@ -47,36 +47,95 @@ export const listNotificationsForUserService = async ({
   user_id,
   class_ids = [],
   section_ids = [],
+  tab = "received",
+  category,
+  status,
+  date_filter,
+  limit = 50,
+  offset = 0,
 }) => {
   const baseWhere = { school_id };
 
-  if (user_role !== "school_admin" && user_role !== "super_admin") {
-    const roleTargets = [user_role, "all"];
-    const audienceFilter = { target_role: { [Op.in]: roleTargets } };
+  if (category) {
+    baseWhere.category = category;
+  }
 
-    const scopeConditions = [{ class_id: null }];
-    if (class_ids.length) scopeConditions.push({ class_id: { [Op.in]: class_ids } });
-    if (section_ids.length) scopeConditions.push({ section_id: { [Op.in]: section_ids } });
+  if (date_filter) {
+    const now = new Date();
+    let past = new Date();
+    if (date_filter === "today") {
+      past.setHours(0,0,0,0);
+    } else if (date_filter === "yesterday") {
+      past.setDate(now.getDate() - 1);
+      past.setHours(0,0,0,0);
+      const endYesterday = new Date(past);
+      endYesterday.setHours(23,59,59,999);
+      baseWhere.created_at = { [Op.between]: [past, endYesterday] };
+    } else if (date_filter === "last_7_days") {
+      past.setDate(now.getDate() - 7);
+    } else if (date_filter === "last_30_days") {
+      past.setDate(now.getDate() - 30);
+    }
+    
+    if (date_filter !== "yesterday") {
+      baseWhere.created_at = { [Op.gte]: past };
+    }
+  }
 
-    const scopedAudienceWhere = {
-      [Op.and]: [
-        audienceFilter, 
-        { [Op.or]: scopeConditions },
-        { sender_user_id: { [Op.ne]: user_id } }, // Hide notifications sent by the user themselves
-        {
-          [Op.or]: [
-            { target_user_id: null },
-            { target_user_id: user_id }
-          ]
-        }
-      ],
-    };
+  if (tab === "sent") {
+    // Sent tab: Show only notifications sent by this user
+    baseWhere.sender_user_id = user_id;
+  } else {
+    // Received tab: Show notifications targeted at this user
+    if (user_role !== "school_admin" && user_role !== "super_admin") {
+      const roleTargets = [user_role, "all"];
+      const audienceFilter = { target_role: { [Op.in]: roleTargets } };
 
-    baseWhere[Op.and] = scopedAudienceWhere[Op.and];
+      const scopeConditions = [{ class_id: null }];
+      if (class_ids.length) scopeConditions.push({ class_id: { [Op.in]: class_ids } });
+      if (section_ids.length) scopeConditions.push({ section_id: { [Op.in]: section_ids } });
+
+      const scopedAudienceWhere = {
+        [Op.and]: [
+          audienceFilter, 
+          { [Op.or]: scopeConditions },
+          { sender_user_id: { [Op.ne]: user_id } }, // Hide notifications sent by the user themselves
+          {
+            [Op.or]: [
+              { target_user_id: null },
+              { target_user_id: user_id }
+            ]
+          }
+        ],
+      };
+
+      baseWhere[Op.and] = scopedAudienceWhere[Op.and];
+    } else {
+       // Admins receive everything by default but we exclude what they sent
+       baseWhere.sender_user_id = { [Op.ne]: user_id };
+    }
+  }
+
+  // Handle status (read/unread) via includes
+  const includeAcks = {
+    model: NotificationAck,
+    attributes: ["id", "user_id", "acknowledged_at"],
+    required: status === "read", // Inner join if we only want read ones
+    where: { user_id },
+  };
+
+  if (status === "unread") {
+     // Ensure no ack exists by using a left join and filtering by ack.id = null
+     includeAcks.required = false;
+     baseWhere['$notification_acks.id$'] = null;
+  } else if (!status) {
+     includeAcks.required = false;
   }
 
   return Notification.findAndCountAll({
     where: baseWhere,
+    limit,
+    offset,
     include: [
       {
         model: User,
@@ -88,15 +147,10 @@ export const listNotificationsForUserService = async ({
         attributes: ["id", "school_name", "logo_url"],
         required: false,
       },
-      {
-        model: NotificationAck,
-        attributes: ["id", "user_id", "acknowledged_at"],
-        required: false,
-        where: { user_id },
-        separate: true,
-      },
+      includeAcks,
     ],
     order: [["created_at", "DESC"]],
+    subQuery: false,
   });
 };
 

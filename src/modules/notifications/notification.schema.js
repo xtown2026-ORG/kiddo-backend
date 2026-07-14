@@ -9,6 +9,12 @@ export const createNotificationSchema = z.object({
 
   class_id: z.number().int().positive().optional(),
   section_id: z.number().int().positive().optional(),
+  category: z.enum([
+    "Attendance", "Homework", "Diary", "Exam", "Fees", "Leave", 
+    "Circular", "Announcement", "Event", "Profile Update", "General", "System"
+  ]).optional(),
+  priority_level: z.enum(["Low", "Medium", "High", "Critical"]).optional(),
+  module_reference: z.string().optional(),
 });
 
 export const updateNotificationSchema = z.object({
@@ -17,6 +23,12 @@ export const updateNotificationSchema = z.object({
   target_role: z.enum(["teacher", "parent", "student", "all"]).optional(),
   class_id: z.number().int().positive().optional().nullable(),
   section_id: z.number().int().positive().optional().nullable(),
+  category: z.enum([
+    "Attendance", "Homework", "Diary", "Exam", "Fees", "Leave", 
+    "Circular", "Announcement", "Event", "Profile Update", "General", "System"
+  ]).optional(),
+  priority_level: z.enum(["Low", "Medium", "High", "Critical"]).optional(),
+  module_reference: z.string().optional(),
 });
 /* parent / teacher: acknowledge */
 export const acknowledgeNotificationSchema = z.object({});

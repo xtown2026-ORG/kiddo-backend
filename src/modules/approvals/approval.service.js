@@ -499,14 +499,24 @@ export const processApprovalAction = async ({
   let entity;
 
   if (normalizedType === "student" || normalizedType === "teacher") {
-    // Accept either profile-table id OR linked user_id to avoid frontend id-shape mismatch.
+    // First try matching exactly by the profile table's primary key
     entity = await Model.findOne({
       where: {
         school_id: user.school_id,
-        [Op.or]: [{ id: normalizedId }, { user_id: normalizedId }],
+        id: normalizedId,
       },
       ...(include ? { include } : {}),
     });
+    // If not found, try matching by user_id
+    if (!entity) {
+      entity = await Model.findOne({
+        where: {
+          school_id: user.school_id,
+          user_id: normalizedId,
+        },
+        ...(include ? { include } : {}),
+      });
+    }
   } else {
     entity = await Model.findByPk(id, include ? { include } : undefined);
   }
@@ -624,6 +634,10 @@ export const processApprovalAction = async ({
     rejection_reason: action === "reject" ? (rejection_reason || null) : null,
     pending_updates: finalPendingUpdates
   });
+
+  if (action === "approve" && entity.user_id) {
+    await User.update({ is_active: true }, { where: { id: entity.user_id } });
+  }
 
   // Acknowledge the notification automatically for this user
   try {

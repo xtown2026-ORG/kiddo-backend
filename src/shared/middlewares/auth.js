@@ -107,3 +107,12 @@ export async function protect(req, res, next) {
     next(err); // 🔥 forward EVERYTHING to global errorHandler
   }
 }
+
+export function authorize(...roles) {
+  return (req, res, next) => {
+    if (!req.user || !roles.includes(req.user.role)) {
+      throw new AppError(`Forbidden: Role ${req.user?.role} is not authorized to perform this action.`, 403);
+    }
+    next();
+  };
+}

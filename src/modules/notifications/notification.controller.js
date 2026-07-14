@@ -24,6 +24,13 @@ export const createNotification = asyncHandler(async (req, res) => {
 
 /* ALL USERS: LIST */
 export const listNotifications = asyncHandler(async (req, res) => {
+  const tab = req.query.tab || "received";
+  const category = req.query.category;
+  const status = req.query.status;
+  const date_filter = req.query.date_filter;
+  const limit = parseInt(req.query.limit) || 50;
+  const offset = parseInt(req.query.offset) || 0;
+
   let classIds = [];
   let sectionIds = [];
 
@@ -85,6 +92,12 @@ export const listNotifications = asyncHandler(async (req, res) => {
     user_id: req.user.id,
     class_ids: classIds,
     section_ids: sectionIds,
+    tab,
+    category,
+    status,
+    date_filter,
+    limit,
+    offset,
   });
 
   res.json({
