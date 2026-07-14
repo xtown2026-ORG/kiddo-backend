@@ -19,6 +19,7 @@ import {
   resolveQuestionSubject,
   SUBJECT_REQUIRED_RESPONSE,
   SUBJECT_MISMATCH_RESPONSE,
+  validateGeminiSolverSubject,
   validateQuestionSubject,
 } from "./subjectValidation.js";
 import { relatedQuestionService } from "../related-questions/relatedQuestion.service.js";
@@ -1081,6 +1082,7 @@ export const askQuestion = asyncHandler(async (req, res) => {
     subject: effectiveSelectedSubject,
   });
   if (
+    hasUploadedImagePayload &&
     requestQuestion &&
     validateQuestionSubject({
       question: requestQuestion,
@@ -1295,6 +1297,15 @@ export const askQuestion = asyncHandler(async (req, res) => {
         : null;
   try {
     if (directGeminiTextRoute) {
+      const solverSubjectValidation = await validateGeminiSolverSubject({
+        question: cleanedQuestion,
+        selectedSubject: normalizedSelectedSubject,
+        subject: normalizedSelectedSubject,
+      });
+      if (solverSubjectValidation.shouldReject) {
+        return res.status(400).json(SUBJECT_MISMATCH_RESPONSE);
+      }
+
       const solverQuestion = resolvedSubject.subject
         ? `${cleanedQuestion}\nSubject: ${resolvedSubject.subject}`
         : cleanedQuestion;

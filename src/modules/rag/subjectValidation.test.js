@@ -3,11 +3,13 @@ import test from "node:test";
 
 import {
   detectQuestionSubject,
+  detectQuestionSubjectSemantically,
   normalizeRequestSubject,
   normalizeSelectedSubject,
   resolveQuestionSubject,
   SUBJECT_MISMATCH_RESPONSE,
   SUBJECT_REQUIRED_RESPONSE,
+  validateGeminiSolverSubject,
   validateQuestionSubject,
 } from "./subjectValidation.js";
 
@@ -89,6 +91,9 @@ test("selected Maths accepts common Maths questions without an explicit subject 
     "Find the value of 45 x 28",
     "Arrange 56, 78, 12, and 90 in descending order",
     "How many three digit numbers can be formed using 1, 2, 3 without repetition?",
+    "How many thousands are there in 1 lakh?",
+    "Express 9768854 in scientific notation",
+    "Sita saved 225 and spent 400. Find due amount",
     "What is the formula for area of a rectangle?",
     "Define rational number",
     "A shopkeeper sold 24 pencils in the morning and 18 pencils in the evening. How many pencils did he sell altogether?",
@@ -125,6 +130,31 @@ test("rejects common Maths questions when Physics or Chemistry is selected", () 
     },
     {
       question: "A shopkeeper sold 24 pencils in the morning and 18 pencils in the evening. How many pencils did he sell altogether?",
+      selectedSubject: "Chemistry",
+    },
+    {
+      question: "What is 25% of 320?",
+      selectedSubject: "Physics",
+    },
+    {
+      question:
+        "Sita saved ₹225.00 and she has spent ₹400 on credit basis for the purchase of stationery. Find her due amount.",
+      selectedSubject: "Chemistry",
+    },
+    {
+      question: "How many thousands are there in 1 lakh?",
+      selectedSubject: "Physics",
+    },
+    {
+      question: "How many thousands are there in 1 lakh?",
+      selectedSubject: "Chemistry",
+    },
+    {
+      question: "Express 9768854 in scientific notation",
+      selectedSubject: "Physics",
+    },
+    {
+      question: "Sita saved 225 and spent 400. Find due amount",
       selectedSubject: "Chemistry",
     },
   ];
@@ -348,4 +378,266 @@ test("treats each validation call independently", () => {
     validateQuestionSubject({ question: "State Ohm's law", subject: "Chemistry" }).isMatch,
     false
   );
+});
+
+test("semantic Gemini Solver validation rejects mismatched selected subjects", async () => {
+  const classifier = async () => '{"subject":"Maths","confidence":0.98}';
+
+  const result = await validateGeminiSolverSubject({
+    question: "What is 25% of 320?",
+    selectedSubject: "Physics",
+    classifier,
+  });
+
+  assert.equal(result.detectedSubject, "Maths");
+  assert.equal(result.confidenceScore, 0.98);
+  assert.equal(result.shouldReject, true);
+  assert.equal(result.isMatch, false);
+});
+
+test("semantic Gemini Solver validation accepts matching selected subjects", async () => {
+  const cases = [
+    {
+      question: "What is 25% of 320?",
+      selectedSubject: "Maths",
+      classifierSubject: "Maths",
+    },
+    {
+      question: "A body moves with constant acceleration. Find its final velocity.",
+      selectedSubject: "Physics",
+      classifierSubject: "Physics",
+    },
+    {
+      question: "Balance the equation Na + Cl2 -> NaCl",
+      selectedSubject: "Chemistry",
+      classifierSubject: "Chemistry",
+    },
+  ];
+
+  for (const testCase of cases) {
+    const result = await validateGeminiSolverSubject({
+      question: testCase.question,
+      selectedSubject: testCase.selectedSubject,
+      classifier: async () => JSON.stringify({
+        subject: testCase.classifierSubject,
+        confidence: 0.99,
+      }),
+    });
+
+    assert.equal(result.detectedSubject, testCase.classifierSubject);
+    assert.equal(result.shouldReject, false);
+    assert.equal(result.isMatch, true);
+  }
+});
+
+test("semantic subject parser accepts plain classifier labels", async () => {
+  assert.equal(
+    await detectQuestionSubjectSemantically({
+      question: "Explain photosynthesis",
+      classifier: async () => "Other Subjects",
+    }),
+    "Other Subjects"
+  );
+});
+
+test("semantic subject parser normalizes Mathematics labels", async () => {
+  const result = await validateGeminiSolverSubject({
+    question:
+      "Sita saved ₹225.00 and she has spent ₹400 on credit basis for the purchase of stationery. Find her due amount.",
+    selectedSubject: "Maths",
+    classifier: async () => '{"subject":"Mathematics","confidence":0.98}',
+  });
+
+  assert.equal(result.detectedSubject, "Maths");
+  assert.equal(result.rawDetectedSubject, "Mathematics");
+  assert.equal(result.shouldReject, false);
+  assert.equal(result.isMatch, true);
+});
+
+test("normalizes equivalent subject labels before Gemini Solver comparison", async () => {
+  assert.equal(normalizeSelectedSubject("Mathematics Subject"), "Maths");
+  assert.equal(normalizeSelectedSubject("School Mathematics"), "Maths");
+  assert.equal(normalizeSelectedSubject("Physics Subject"), "Physics");
+  assert.equal(normalizeSelectedSubject("Chemistry Subject"), "Chemistry");
+
+  const mathsResult = await validateGeminiSolverSubject({
+    question: "How many thousands are there in 1 lakh?",
+    selectedSubject: "Maths",
+    classifier: async () => '{"subject":"Mathematics Subject","confidence":0.98}',
+  });
+  const physicsResult = await validateGeminiSolverSubject({
+    question: "Find the velocity of a body after 10 seconds.",
+    selectedSubject: "Physics",
+    classifier: async () => '{"subject":"Physics Subject","confidence":0.98}',
+  });
+  const chemistryResult = await validateGeminiSolverSubject({
+    question: "Balance the equation Na + Cl2 -> NaCl",
+    selectedSubject: "Chemistry",
+    classifier: async () => '{"subject":"Chemistry Subject","confidence":0.98}',
+  });
+
+  assert.equal(mathsResult.rawDetectedSubject, "Mathematics Subject");
+  assert.equal(mathsResult.detectedSubject, "Maths");
+  assert.equal(mathsResult.shouldReject, false);
+  assert.equal(physicsResult.detectedSubject, "Physics");
+  assert.equal(physicsResult.shouldReject, false);
+  assert.equal(chemistryResult.detectedSubject, "Chemistry");
+  assert.equal(chemistryResult.shouldReject, false);
+});
+
+test("standalone mathematical representation is Maths, not Physics or Chemistry", async () => {
+  const question = "Express in scientific notation 9768854";
+
+  assert.equal(detectQuestionSubject(question), "Maths");
+  assert.equal(
+    (await validateGeminiSolverSubject({ question, selectedSubject: "Maths" })).shouldReject,
+    false
+  );
+  assert.equal(
+    (await validateGeminiSolverSubject({ question, selectedSubject: "Physics" })).shouldReject,
+    true
+  );
+  assert.equal(
+    (await validateGeminiSolverSubject({ question, selectedSubject: "Chemistry" })).shouldReject,
+    true
+  );
+});
+
+test("semantic classifier repair handles invalid first-pass output", async () => {
+  const pureMathQuestion = "Express in scientific notation 9768854";
+  const outputs = ["This looks like a notation question.", '{"subject":"Maths","confidence":0.96}'];
+
+  const pureMathResult = await validateGeminiSolverSubject({
+    question: pureMathQuestion,
+    selectedSubject: "Maths",
+    classifier: async () => outputs.shift(),
+  });
+
+  assert.equal(pureMathResult.detectedSubject, "Maths");
+  assert.equal(pureMathResult.shouldReject, false);
+});
+
+test("physics notation context remains Physics", async () => {
+  const question = "Express the speed of light, 300000000 m/s, in scientific notation.";
+
+  const result = await validateGeminiSolverSubject({
+    question,
+    selectedSubject: "Physics",
+    classifier: async () => '{"subject":"Physics","confidence":0.96}',
+  });
+
+  assert.equal(result.detectedSubject, "Physics");
+  assert.equal(result.shouldReject, false);
+});
+
+test("semantic validator rejects wrong primary subject labels", async () => {
+  const question = "Express in scientific notation 9768854";
+
+  const result = await validateGeminiSolverSubject({
+    question,
+    selectedSubject: "Physics",
+    classifier: async () => '{"subject":"Maths","confidence":0.97}',
+  });
+
+  assert.equal(result.detectedSubject, "Maths");
+  assert.equal(result.shouldReject, true);
+  assert.equal(result.isMatch, false);
+});
+
+test("semantic validator rejects place-value Maths under science subjects", async () => {
+  const question = "How many thousands are there in 1 lakh?";
+
+  const mathsResult = await validateGeminiSolverSubject({
+    question,
+    selectedSubject: "Maths",
+    classifier: async () => '{"subject":"Mathematics","confidence":0.98}',
+  });
+  const physicsResult = await validateGeminiSolverSubject({
+    question,
+    selectedSubject: "Physics",
+    classifier: async () => '{"subject":"Mathematics","confidence":0.98}',
+  });
+  const chemistryResult = await validateGeminiSolverSubject({
+    question,
+    selectedSubject: "Chemistry",
+    classifier: async () => '{"subject":"Mathematics","confidence":0.98}',
+  });
+
+  assert.equal(mathsResult.detectedSubject, "Maths");
+  assert.equal(mathsResult.shouldReject, false);
+  assert.equal(physicsResult.detectedSubject, "Maths");
+  assert.equal(physicsResult.shouldReject, true);
+  assert.equal(chemistryResult.detectedSubject, "Maths");
+  assert.equal(chemistryResult.shouldReject, true);
+});
+
+test("Gemini Solver fallback detects short Maths curriculum questions", async () => {
+  const questions = [
+    "How many thousands are there in 1 lakh?",
+    "Express 9768854 in scientific notation",
+    "Sita saved 225 and spent 400. Find due amount",
+  ];
+
+  for (const question of questions) {
+    assert.equal(detectQuestionSubject(question), "Maths");
+
+    const mathsResult = await validateGeminiSolverSubject({
+      question,
+      selectedSubject: "Maths",
+    });
+    const physicsResult = await validateGeminiSolverSubject({
+      question,
+      selectedSubject: "Physics",
+    });
+
+    assert.equal(mathsResult.detectedSubject, "Maths");
+    assert.equal(mathsResult.solverAllowed, true);
+    assert.equal(mathsResult.shouldReject, false);
+    assert.equal(physicsResult.detectedSubject, "Maths");
+    assert.equal(physicsResult.solverAllowed, false);
+    assert.equal(physicsResult.shouldReject, true);
+    assert.equal(SUBJECT_MISMATCH_RESPONSE.message, "The selected subject does not match the question.");
+  }
+});
+
+test("Gemini Solver validation blocks when no detected subject is available", async () => {
+  const result = await validateGeminiSolverSubject({
+    question: "Explain this topic in simple words",
+    selectedSubject: "Physics",
+    classifier: async () => "",
+  });
+
+  assert.equal(result.detectedSubject, null);
+  assert.equal(result.solverAllowed, false);
+  assert.equal(result.shouldReject, true);
+  assert.equal(result.isMatch, false);
+});
+
+test("chemistry notation context remains Chemistry", async () => {
+  const question = "Express 0.000001 mol of NaCl in scientific notation.";
+
+  const result = await validateGeminiSolverSubject({
+    question,
+    selectedSubject: "Chemistry",
+    classifier: async () => '{"subject":"Chemistry","confidence":0.96}',
+  });
+
+  assert.equal(result.detectedSubject, "Chemistry");
+  assert.equal(result.shouldReject, false);
+});
+
+test("commercial arithmetic fallback is Maths but accounting records are not", () => {
+  const commercialArithmeticQuestion =
+    "Sita saved ₹225.00 and she has spent ₹400 on credit basis for the purchase of stationery. Find her due amount.";
+  const accountingQuestion = "Prepare the journal entry for goods purchased on credit.";
+
+  assert.equal(detectQuestionSubject(commercialArithmeticQuestion), "Maths");
+  assert.equal(
+    validateQuestionSubject({
+      question: commercialArithmeticQuestion,
+      selectedSubject: "Maths",
+    }).shouldReject,
+    false
+  );
+  assert.equal(detectQuestionSubject(accountingQuestion), "Accounts");
 });
