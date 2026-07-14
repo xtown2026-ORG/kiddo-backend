@@ -48,17 +48,12 @@ export const listNotificationsForUserService = async ({
   class_ids = [],
   section_ids = [],
   tab = "received",
-  category,
   status,
   date_filter,
   limit = 50,
   offset = 0,
 }) => {
   const baseWhere = { school_id };
-
-  if (category) {
-    baseWhere.category = category;
-  }
 
   if (date_filter) {
     const now = new Date();
