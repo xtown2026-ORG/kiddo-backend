@@ -25,14 +25,14 @@ export const requestTeacherProfileUpdateService = async (
   const userUpdates = {};
 
   const currentUser = await User.findByPk(user_id, {
-    attributes: ['name', 'phone', 'email', 'avatar_url'],
+    attributes: ['id', 'name', 'phone', 'email', 'avatar_url'],
   });
 
   if (avatar_url !== undefined) {
     const currentAvatar = currentUser?.avatar_url || null;
     const newAvatar = avatar_url || null;
     if (newAvatar !== currentAvatar) {
-      userUpdates.avatar_url = newAvatar;
+      await currentUser.update({ avatar_url: newAvatar });
     }
   }
 
@@ -74,11 +74,8 @@ export const requestTeacherProfileUpdateService = async (
   }
 
   await teacher.update({
-    pending_updates: { user: userUpdates, teacher: teacherUpdates },
     approval_status: "pending",
-    approved_by: null,
-    approved_at: null,
-    rejection_reason: null,
+    pending_updates: { user: userUpdates, teacher: teacherUpdates },
   });
 
   const changedFields = [...Object.keys(userUpdates), ...Object.keys(teacherUpdates)];

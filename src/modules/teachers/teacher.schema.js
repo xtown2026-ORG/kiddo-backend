@@ -19,9 +19,12 @@ export const completeTeacherProfileSchema = z.object({
   phone: z.string()
     .length(10, "Please enter a valid 10-digit mobile number.")
     .regex(/^[6-9]\d{9}$/, "Please enter a valid 10-digit mobile number."),
-  gender: z.enum(["male", "female", "other"], {
-    errorMap: () => ({ message: "Please select your gender." })
-  }),
+  gender: z.preprocess(
+    (val) => (typeof val === 'string' ? val.toLowerCase() : val),
+    z.enum(["male", "female", "other"], {
+      errorMap: () => ({ message: "Please select your gender." })
+    })
+  ).optional(),
   designation: z.string()
     .min(2, "Please enter a valid designation.")
     .max(30, "Please enter a valid designation.")

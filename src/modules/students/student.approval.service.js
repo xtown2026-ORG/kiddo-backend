@@ -32,14 +32,14 @@ export const requestStudentProfileUpdateService = async (
 
   // Load the current user record to compare against
   const currentUser = await User.findByPk(user_id, {
-    attributes: ['name', 'phone', 'email', 'avatar_url'],
+    attributes: ['id', 'name', 'phone', 'email', 'avatar_url'],
   });
 
   if (avatar_url !== undefined) {
     const currentAvatar = currentUser?.avatar_url || null;
     const newAvatar = avatar_url || null;
     if (newAvatar !== currentAvatar) {
-      userUpdates.avatar_url = newAvatar;
+      await currentUser.update({ avatar_url: newAvatar });
     }
   }
 
@@ -84,15 +84,12 @@ export const requestStudentProfileUpdateService = async (
   // If nothing actually changed, return early
   const totalChanges = Object.keys(userUpdates).length + Object.keys(studentUpdates).length;
   if (totalChanges === 0) {
-    return { message: "No changes detected" };
+    return { message: "Profile updated" };
   }
 
   await student.update({
-    pending_updates: { user: userUpdates, student: studentUpdates },
     approval_status: "pending",
-    approved_by: null,
-    approved_at: null,
-    rejection_reason: null, // ✅ IMPORTANT
+    pending_updates: { user: userUpdates, student: studentUpdates },
   });
 
 

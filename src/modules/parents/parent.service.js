@@ -229,7 +229,15 @@ export const updateParentProfileService = async (user_id, data) => {
   if (parent) {
     // Only keep user fields that actually changed vs current DB values
     const userUpdateData = {};
-    const userFields = ['name', 'phone', 'email', 'avatar_url'];
+    const userFields = ['name', 'phone', 'email'];
+    
+    if (rawUserUpdateData.avatar_url !== undefined) {
+      const currentAvatar = user.avatar_url || null;
+      const newAvatar = rawUserUpdateData.avatar_url || null;
+      if (newAvatar !== currentAvatar) {
+        await user.update({ avatar_url: newAvatar });
+      }
+    }
     userFields.forEach(field => {
       if (rawUserUpdateData[field] !== undefined) {
         const currentVal = (user[field] ?? '').toString().trim();
@@ -261,11 +269,8 @@ export const updateParentProfileService = async (user_id, data) => {
     }
 
     const parentUpdateData = {
-      pending_updates: { user: userUpdateData, parent: parentPendingUpdates },
       approval_status: "pending",
-      approved_by: null,
-      approved_at: null,
-      rejection_reason: null,
+      pending_updates: { user: userUpdateData, parent: parentPendingUpdates },
     };
 
     await parent.update(parentUpdateData);

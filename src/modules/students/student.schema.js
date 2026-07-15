@@ -14,7 +14,10 @@ export const completeStudentProfileSchema = z.object({
   phone: z.preprocess(emptyToUndefined, z.string().optional()),
   email: z.preprocess(emptyToUndefined, z.string().email().optional()),
   dob: z.string().optional(), // or z.coerce.date()
-  gender: z.enum(["male", "female", "other"]).optional(),
+  gender: z.preprocess(
+    (val) => (typeof val === 'string' ? val.toLowerCase() : val),
+    z.enum(["male", "female", "other"])
+  ).optional(),
   blood_group: z.string().optional(),
   father_name: z.string().optional(),
   mother_name: z.string().optional(),
