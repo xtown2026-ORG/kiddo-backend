@@ -75,6 +75,24 @@ export async function assignTeacher({
       );
     }
 
+    const currentSubjectCount = await TeacherAssignment.count({
+      where: {
+        school_id: schoolId,
+        teacher_id: teacher.id,
+        section_id: sectionId,
+        academic_year: academicYear,
+        is_active: true,
+      },
+      transaction,
+    });
+
+    if (currentSubjectCount >= 2) {
+      throw new AppError(
+        "A teacher can only be assigned to a maximum of 2 subjects in the same class.",
+        409
+      );
+    }
+
     // If trying to set as class teacher, check if section already has a class teacher
     if (isClassTeacher) {
       const existingClassTeacher = await TeacherAssignment.findOne({

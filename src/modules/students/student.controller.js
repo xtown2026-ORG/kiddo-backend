@@ -183,6 +183,7 @@ export const getMyProfile = asyncHandler(async (req, res) => {
 
   const data = student.get({ plain: true });
   const user = data.user || {};
+
   const linkedParent = await Parent.findOne({
     where: { student_id: student.id },
     include: [{ model: User, required: false }],

@@ -157,7 +157,7 @@ export const approveTeacherProfileService = async ({
 
     // Optional: activate teacher user on approval
     await User.update(
-      { is_active: true },
+      { is_active: true, first_login: false },
       { where: { id: teacher.user_id } }
     );
   }

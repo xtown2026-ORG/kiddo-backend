@@ -190,6 +190,9 @@ export const approveStudentProfileService = async ({
         { transaction: t }
       );
 
+      // Permanently clear first_login upon approval so they aren't forced into "Complete Profile" flow
+      await User.update({ first_login: false }, { where: { id: student.user_id }, transaction: t });
+
       await triggerProfileApprovalNotification({
         school_id,
         sender_user_id: teacher_user_id,

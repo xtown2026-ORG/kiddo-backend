@@ -162,7 +162,7 @@ export const approveParentService = async ({
       );
 
       await user.update(
-        { is_active: true },
+        { is_active: true, first_login: false },
         { transaction: t }
       );
 

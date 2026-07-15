@@ -230,6 +230,7 @@ export const getMyProfile = asyncHandler(async (req, res) => {
 
   const data = teacher.get({ plain: true });
   const user = data.user || data.User || {};
+
   res.json({
     ...data,
     ...user,
