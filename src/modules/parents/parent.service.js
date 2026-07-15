@@ -229,6 +229,7 @@ export const updateParentProfileService = async (user_id, data) => {
   if (parent) {
     // Only keep user fields that actually changed vs current DB values
     const userUpdateData = {};
+    const change_details = [];
     const userFields = ['name', 'phone', 'email'];
     
     if (rawUserUpdateData.avatar_url !== undefined) {
@@ -244,6 +245,7 @@ export const updateParentProfileService = async (user_id, data) => {
         const newVal = (rawUserUpdateData[field] ?? '').toString().trim();
         if (newVal !== currentVal) {
           userUpdateData[field] = rawUserUpdateData[field];
+          change_details.push(`${field} changed from '${currentVal}' to '${newVal}'`);
         }
       }
     });
@@ -261,6 +263,7 @@ export const updateParentProfileService = async (user_id, data) => {
     const parentPendingUpdates = {};
     if (finalRelationType) {
       parentPendingUpdates.relation_type = finalRelationType;
+      change_details.push(`relation_type changed from '${parent.relation_type ?? ''}' to '${finalRelationType}'`);
     }
 
     const totalChanges = Object.keys(userUpdateData).length + Object.keys(parentPendingUpdates).length;
@@ -288,6 +291,7 @@ export const updateParentProfileService = async (user_id, data) => {
       sender_role: "parent",
       parent_name: user.name,
       changed_fields: changedFields,
+      change_details,
       class_id: student ? student.class_id : null,
       section_id: student ? student.section_id : null,
     });

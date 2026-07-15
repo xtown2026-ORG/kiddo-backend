@@ -122,6 +122,7 @@ export const triggerProfileUpdateNotification = async ({
   student_name,
   parent_name,
   changed_fields = [],
+  change_details = [],
   class_id,
   section_id,
   target_role = "school_admin", // Default to school admin (for teachers/parents)
@@ -142,7 +143,9 @@ export const triggerProfileUpdateNotification = async ({
   };
 
   let changesText = "profile update request";
-  if (changed_fields && changed_fields.length > 0) {
+  if (change_details && change_details.length > 0) {
+    changesText = `profile update request: ${change_details.join(', ')}`;
+  } else if (changed_fields && changed_fields.length > 0) {
     if (changed_fields.length === 1) {
       const f = changed_fields[0];
       changesText = `${fieldLabels[f] || f.replace(/_/g, ' ')} change request`;
@@ -163,6 +166,29 @@ export const triggerProfileUpdateNotification = async ({
     target_role, 
     class_id,
     section_id,
+  });
+};
+
+export const triggerProfileApprovalNotification = async ({
+  school_id,
+  sender_user_id,
+  target_user_id,
+  target_role,
+  change_details = [],
+}) => {
+  let message = `Your profile update request has been approved.`;
+  if (change_details && change_details.length > 0) {
+    message += ` Changes: ${change_details.join(', ')}`;
+  }
+
+  return createNotification({
+    school_id,
+    sender_user_id,
+    sender_role: "school_admin",
+    title: "Profile Update Approved",
+    message,
+    target_role,
+    target_user_id,
   });
 };
 

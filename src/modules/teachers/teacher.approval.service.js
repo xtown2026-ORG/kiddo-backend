@@ -2,7 +2,7 @@ import Teacher from "./teacher.model.js";
 import User from "../users/user.model.js";
 import AppError from "../../shared/appError.js";
 
-import { triggerProfileUpdateNotification } from "../notifications/notification-trigger.service.js";
+import { triggerProfileUpdateNotification, triggerProfileApprovalNotification } from "../notifications/notification-trigger.service.js";
 
 /* =========================
    TEACHER: REQUEST UPDATE
@@ -23,6 +23,7 @@ export const requestTeacherProfileUpdateService = async (
 
   const { avatar_url, ...teacherUpdates } = updates || {};
   const userUpdates = {};
+  const change_details = [];
 
   const currentUser = await User.findByPk(user_id, {
     attributes: ['id', 'name', 'phone', 'email', 'avatar_url'],
@@ -43,6 +44,7 @@ export const requestTeacherProfileUpdateService = async (
       const newVal = (updates[field] ?? '').toString().trim();
       if (newVal !== currentVal) {
         userUpdates[field] = updates[field];
+        change_details.push(`${field} changed from '${currentVal}' to '${newVal}'`);
       }
       delete teacherUpdates[field];
     }
@@ -57,6 +59,8 @@ export const requestTeacherProfileUpdateService = async (
       const newVal = (teacherUpdates[field] ?? '').toString().trim();
       if (newVal === currentVal) {
         delete teacherUpdates[field];
+      } else {
+        change_details.push(`${field} changed from '${currentVal}' to '${newVal}'`);
       }
     }
   });
@@ -86,6 +90,7 @@ export const requestTeacherProfileUpdateService = async (
     student_name: null,
     parent_name: null,
     changed_fields: changedFields,
+    change_details,
   }).catch(err => console.error("Failed to trigger profile update notification", err));
 
   return {
@@ -115,14 +120,22 @@ export const approveTeacherProfileService = async ({
   }
 
   if (action === "approve") {
+    const changeDetails = [];
     if (teacher.pending_updates) {
       const { user: userUpdates, teacher: teacherUpdates } = teacher.pending_updates;
+      const currentUser = await User.findByPk(teacher.user_id);
 
       if (userUpdates && Object.keys(userUpdates).length > 0) {
+        for (const [key, newVal] of Object.entries(userUpdates)) {
+          changeDetails.push(`${key} changed from '${currentUser[key] ?? ''}' to '${newVal}'`);
+        }
         await User.update(userUpdates, { where: { id: teacher.user_id } });
       }
 
       if (teacherUpdates && Object.keys(teacherUpdates).length > 0) {
+        for (const [key, newVal] of Object.entries(teacherUpdates)) {
+          changeDetails.push(`${key} changed from '${teacher[key] ?? ''}' to '${newVal}'`);
+        }
         await teacher.update(teacherUpdates);
       }
     }
@@ -133,6 +146,14 @@ export const approveTeacherProfileService = async ({
       approved_at: new Date(),
       pending_updates: null,
     });
+
+    await triggerProfileApprovalNotification({
+      school_id,
+      sender_user_id: admin_user_id,
+      target_user_id: teacher.user_id,
+      target_role: "teacher",
+      change_details: changeDetails
+    }).catch(err => console.error("Failed to trigger approval notification", err));
 
     // Optional: activate teacher user on approval
     await User.update(

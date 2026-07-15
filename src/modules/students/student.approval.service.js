@@ -4,7 +4,7 @@ import User from "../users/user.model.js";
 import AppError from "../../shared/appError.js";
 import { logApprovalAction } from "../../shared/utils/auditLogger.js";
 import TeacherAssignment from "../teacher-assignments/teacher-assignment.model.js";
-import { triggerProfileUpdateNotification } from "../notifications/notification-trigger.service.js";
+import { triggerProfileUpdateNotification, triggerProfileApprovalNotification } from "../notifications/notification-trigger.service.js";
 
 /* =========================
    STUDENT: REQUEST UPDATE
@@ -29,6 +29,7 @@ export const requestStudentProfileUpdateService = async (
 
   const { avatar_url, ...studentUpdates } = updates || {};
   const userUpdates = {};
+  const change_details = [];
 
   // Load the current user record to compare against
   const currentUser = await User.findByPk(user_id, {
@@ -51,6 +52,7 @@ export const requestStudentProfileUpdateService = async (
       const newVal = (updates[field] ?? '').toString().trim();
       if (newVal !== currentVal) {
         userUpdates[field] = updates[field];
+        change_details.push(`${field} changed from '${currentVal}' to '${newVal}'`);
       }
       delete studentUpdates[field];
     }
@@ -69,6 +71,8 @@ export const requestStudentProfileUpdateService = async (
       const newVal = (studentUpdates[field] ?? '').toString().trim();
       if (newVal === currentVal) {
         delete studentUpdates[field];
+      } else {
+        change_details.push(`${field} changed from '${currentVal}' to '${newVal}'`);
       }
     }
   });
@@ -104,6 +108,7 @@ export const requestStudentProfileUpdateService = async (
     sender_role: "student",
     student_name: studentUser ? studentUser.name : "Student",
     changed_fields: changedFields,
+    change_details,
     class_id: student.class_id,
     section_id: student.section_id,
     target_role: "teacher", // Send to teacher instead of school admin
@@ -154,15 +159,44 @@ export const approveStudentProfileService = async ({
     }
 
     if (action === "approve") {
+      const changeDetails = [];
+      if (student.pending_updates) {
+        const { user: userUpdates, student: studentUpdates } = student.pending_updates;
+        const currentUser = await User.findByPk(student.user_id, { transaction: t });
+
+        if (userUpdates && Object.keys(userUpdates).length > 0) {
+          for (const [key, newVal] of Object.entries(userUpdates)) {
+            changeDetails.push(`${key} changed from '${currentUser[key] ?? ''}' to '${newVal}'`);
+          }
+          await User.update(userUpdates, { where: { id: student.user_id }, transaction: t });
+        }
+
+        if (studentUpdates && Object.keys(studentUpdates).length > 0) {
+          for (const [key, newVal] of Object.entries(studentUpdates)) {
+            changeDetails.push(`${key} changed from '${student[key] ?? ''}' to '${newVal}'`);
+          }
+          await student.update(studentUpdates, { transaction: t });
+        }
+      }
+
       await student.update(
         {
           approval_status: "approved",
           approved_by: teacher_user_id,
           approved_at: new Date(),
           rejection_reason: null,
+          pending_updates: null,
         },
         { transaction: t }
       );
+
+      await triggerProfileApprovalNotification({
+        school_id,
+        sender_user_id: teacher_user_id,
+        target_user_id: student.user_id,
+        target_role: "student",
+        change_details: changeDetails
+      }).catch(err => console.error("Failed to trigger approval notification", err));
     }
 
     if (action === "reject") {
