@@ -25,23 +25,33 @@ export const completeTeacherProfileSchema = z.object({
       errorMap: () => ({ message: "Please select your gender." })
     })
   ).optional(),
-  designation: z.string()
-    .min(2, "Please enter a valid designation.")
-    .max(30, "Please enter a valid designation.")
-    .regex(/^[A-Za-z\s]+$/, "Please enter a valid designation.")
-    .transform(val => val.trim()),
-  qualification: z.string()
-    .min(2, "Please enter your qualification.")
-    .max(50, "Please enter your qualification.")
-    .regex(/^[A-Za-z\s.]+$/, "Please enter your qualification.")
-    .transform(val => val.trim()),
-  experience: z.coerce.number({
-      invalid_type_error: "Please enter valid experience between 0 and 50 years."
-    })
-    .min(0, "Please enter valid experience between 0 and 50 years.")
-    .max(50, "Please enter valid experience between 0 and 50 years."),
-  email: z.string()
-    .email("Please enter a valid email address.")
-    .transform(val => val.trim().toLowerCase()),
+  designation: z.preprocess(
+    emptyToUndefined,
+    z.string()
+      .min(2, "Please enter a valid designation.")
+      .max(30, "Please enter a valid designation.")
+      .regex(/^[A-Za-z\s]+$/, "Please enter a valid designation.")
+      .transform(val => val.trim())
+  ).optional(),
+  qualification: z.preprocess(
+    emptyToUndefined,
+    z.string()
+      .min(2, "Please enter your qualification.")
+      .max(50, "Please enter your qualification.")
+      .regex(/^[A-Za-z\s.]+$/, "Please enter your qualification.")
+      .transform(val => val.trim())
+  ).optional(),
+  experience: z.preprocess(
+    emptyToUndefined,
+    z.coerce.number()
+      .min(0, "Please enter valid experience between 0 and 50 years.")
+      .max(50, "Please enter valid experience between 0 and 50 years.")
+  ).optional(),
+  email: z.preprocess(
+    emptyToUndefined,
+    z.string()
+      .email("Please enter a valid email address.")
+      .transform(val => val.trim().toLowerCase())
+  ).optional(),
   avatar_url: z.string().optional().or(z.literal("")).or(z.null()),
 });
