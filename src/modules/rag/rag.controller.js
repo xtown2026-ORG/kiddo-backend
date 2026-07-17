@@ -1,6 +1,7 @@
 import asyncHandler from "../../shared/asyncHandler.js";
 import { GoogleGenAI } from "@google/genai";
 import { routeRagQuestion } from "./subjectRouter.js";
+import { formatGeneratedAnswerText } from "./answerFormatting.js";
 import {
   isEducationalFillInBlankQuestion,
   isEquationBasedQuestion,
@@ -1132,7 +1133,7 @@ export const askQuestion = asyncHandler(async (req, res) => {
       console.log("IMAGE_VALIDATION_RESULT = MATCH");
       console.log("Image Answer Generated");
       const finalAnswer =
-        formatImageAnswerForStudent(answer) ||
+        formatGeneratedAnswerText(formatImageAnswerForStudent(answer)) ||
         "I could not generate an answer from the image right now.";
 
       if (isSolverMode) {
@@ -1504,6 +1505,8 @@ export const askQuestion = asyncHandler(async (req, res) => {
       textAnswer = sanitizeTamilOutput(textAnswer);
     }
 
+    textAnswer = formatGeneratedAnswerText(textAnswer);
+
     await saveRagChatLog({
       userId: req.user?.id,
       question: cleanedQuestion,
@@ -1537,10 +1540,11 @@ export const askQuestion = asyncHandler(async (req, res) => {
   }
 
   // 🔹 VOICE MODE
-  const sentences = chunkText(result.answer);
+  const voiceAnswer = formatGeneratedAnswerText(result.answer);
+  const sentences = chunkText(voiceAnswer);
 
 // send subtitle text for frontend
-res.setHeader("x-subtitle-text", encodeURIComponent(result.answer));
+res.setHeader("x-subtitle-text", encodeURIComponent(voiceAnswer));
 
 res.setHeader("Content-Type", "audio/wav");
 res.setHeader("Transfer-Encoding", "chunked");
@@ -1558,7 +1562,7 @@ for (const sentence of sentences) {
 await saveRagChatLog({
   userId: req.user?.id,
   question: cleanedQuestion,
-  answer: result.answer,
+  answer: voiceAnswer,
   classLevel: effectiveClassLevel,
   tokensUsed: result?.tokens_used || 0,
 });
@@ -1662,7 +1666,7 @@ export const askImageQuestion = asyncHandler(async (req, res) => {
     console.log("IMAGE_VALIDATION_RESULT = MATCH");
     console.log("Image Answer Generated");
     const finalAnswer =
-      formatImageAnswerForStudent(answer) ||
+      formatGeneratedAnswerText(formatImageAnswerForStudent(answer)) ||
       "I could not generate an answer from the image right now.";
 
     return res.json({
