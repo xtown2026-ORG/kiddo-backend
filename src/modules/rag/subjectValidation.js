@@ -184,6 +184,13 @@ const getSubjectScores = (question) => {
 const getProvidedSubject = (...subjects) =>
   subjects.find((subject) => String(subject || "").trim()) || null;
 
+const RAW_PLACEHOLDER_PATTERN = /^\s*\{\{\s*(?:selected_subject|selectedSubject|question)\s*\}\}\s*$/i;
+
+const hasSubjectValidationInput = (value) => {
+  const text = String(value ?? "").trim();
+  return Boolean(text) && !RAW_PLACEHOLDER_PATTERN.test(text);
+};
+
 export const normalizeSelectedSubject = (subject) => {
   const subjectKey = String(subject || "")
     .trim()
@@ -303,7 +310,7 @@ export const validateQuestionSubject = ({ question, selectedSubject, subject }) 
   };
 };
 
-const buildSemanticSubjectPrompt = (question) =>
+const buildSemanticSubjectPrompt = ({ question, selectedSubject }) =>
   [
     "You are a strict academic subject classifier for Indian school Classes 6-12.",
     "Classify the user's question by the school subject it actually belongs to.",
@@ -332,7 +339,10 @@ const buildSemanticSubjectPrompt = (question) =>
     "Return only compact JSON with this exact shape:",
     '{"subject":"Maths|Physics|Chemistry|Other Subjects","confidence":0.0}',
     "",
-    "Question:",
+    "Selected Subject:",
+    String(selectedSubject || "").trim(),
+    "",
+    "Student Question:",
     String(question || "").trim(),
   ].join("\n");
 
@@ -431,11 +441,11 @@ const runSubjectClassifier = async (prompt) => {
   return extractRawGeminiText(result);
 };
 
-const classifyQuestionSubjectSemantically = async ({ question, classifier } = {}) => {
-  const prompt = buildSemanticSubjectPrompt(question);
+const classifyQuestionSubjectSemantically = async ({ question, selectedSubject, classifier } = {}) => {
+  const prompt = buildSemanticSubjectPrompt({ question, selectedSubject });
 
   if (classifier) {
-    const rawText = await classifier({ question, prompt });
+    const rawText = await classifier({ question, selectedSubject, prompt });
     const classification = parseSemanticClassification(rawText);
     if (classification.subject) {
       return buildClassificationResult({ ...classification, source: "semantic" });
@@ -443,7 +453,7 @@ const classifyQuestionSubjectSemantically = async ({ question, classifier } = {}
 
     const repairPrompt = buildSemanticSubjectRepairPrompt({ question, previousOutput: rawText });
     return buildClassificationResult({
-      ...parseSemanticClassification(await classifier({ question, prompt: repairPrompt })),
+      ...parseSemanticClassification(await classifier({ question, selectedSubject, prompt: repairPrompt })),
       source: "semantic",
     });
   }
@@ -487,7 +497,21 @@ export const validateGeminiSolverSubject = async ({
   subject,
   classifier,
 } = {}) => {
-  const normalizedSelectedSubject = normalizeSelectedSubject(getProvidedSubject(selectedSubject, subject));
+  const providedSelectedSubject = getProvidedSubject(selectedSubject, subject);
+
+  if (!hasSubjectValidationInput(providedSelectedSubject) || !hasSubjectValidationInput(question)) {
+    return {
+      isMatch: false,
+      shouldReject: true,
+      isInvalidInput: true,
+      selectedSubject: normalizeSelectedSubject(providedSelectedSubject),
+      detectedSubject: "Unknown",
+      confidenceScore: null,
+      solverAllowed: false,
+    };
+  }
+
+  const normalizedSelectedSubject = normalizeSelectedSubject(providedSelectedSubject);
   const shouldSkipSubjectValidation = normalizedSelectedSubject === "Other Subjects";
 
   if (shouldSkipSubjectValidation || !PRIMARY_VALIDATION_SUBJECTS.has(normalizedSelectedSubject)) {
@@ -499,7 +523,16 @@ export const validateGeminiSolverSubject = async ({
     };
   }
 
-  const classification = await classifyQuestionSubjectSemantically({ question, classifier });
+  console.log("SUBJECT_VALIDATION_INPUT:", {
+    selectedSubject: String(providedSelectedSubject || "").trim(),
+    question: String(question || "").trim(),
+  });
+
+  const classification = await classifyQuestionSubjectSemantically({
+    question,
+    selectedSubject: providedSelectedSubject,
+    classifier,
+  });
   const rawDetectedSubject = classification.rawSubject;
   const normalizedDetectedSubject = classification.subject;
   const solverAllowed = normalizedDetectedSubject === normalizedSelectedSubject;
@@ -535,4 +568,11 @@ export const SUBJECT_REQUIRED_RESPONSE = Object.freeze({
   success: false,
   type: "SUBJECT_REQUIRED",
   message: "Please select a specific subject.",
+});
+
+export const SUBJECT_INVALID_INPUT_RESPONSE = Object.freeze({
+  detected_subject: "Unknown",
+  confidence: "low",
+  validation: "INVALID_INPUT",
+  message: "Missing subject or question input.",
 });

@@ -18,6 +18,7 @@ import {
   normalizeRequestSubject,
   resolveQuestionSubject,
   SUBJECT_REQUIRED_RESPONSE,
+  SUBJECT_INVALID_INPUT_RESPONSE,
   SUBJECT_MISMATCH_RESPONSE,
   validateGeminiSolverSubject,
   validateQuestionSubject,
@@ -1302,6 +1303,9 @@ export const askQuestion = asyncHandler(async (req, res) => {
         selectedSubject: normalizedSelectedSubject,
         subject: normalizedSelectedSubject,
       });
+      if (solverSubjectValidation.isInvalidInput) {
+        return res.status(400).json(SUBJECT_INVALID_INPUT_RESPONSE);
+      }
       if (solverSubjectValidation.shouldReject) {
         return res.status(400).json(SUBJECT_MISMATCH_RESPONSE);
       }

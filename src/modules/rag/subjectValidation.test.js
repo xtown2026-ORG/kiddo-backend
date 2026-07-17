@@ -7,6 +7,7 @@ import {
   normalizeRequestSubject,
   normalizeSelectedSubject,
   resolveQuestionSubject,
+  SUBJECT_INVALID_INPUT_RESPONSE,
   SUBJECT_MISMATCH_RESPONSE,
   SUBJECT_REQUIRED_RESPONSE,
   validateGeminiSolverSubject,
@@ -332,6 +333,8 @@ test("other subjects routing validation accepts fallback subject field and gener
 
 test("subject validation responses use required routing messages", () => {
   assert.equal(SUBJECT_REQUIRED_RESPONSE.message, "Please select a specific subject.");
+  assert.equal(SUBJECT_INVALID_INPUT_RESPONSE.validation, "INVALID_INPUT");
+  assert.equal(SUBJECT_INVALID_INPUT_RESPONSE.message, "Missing subject or question input.");
   assert.equal(SUBJECT_MISMATCH_RESPONSE.message, "The selected subject does not match the question.");
 });
 
@@ -393,6 +396,42 @@ test("semantic Gemini Solver validation rejects mismatched selected subjects", a
   assert.equal(result.confidenceScore, 0.98);
   assert.equal(result.shouldReject, true);
   assert.equal(result.isMatch, false);
+});
+
+test("semantic Gemini Solver validation rejects missing runtime inputs before classifier", async () => {
+  let classifierCalled = false;
+
+  const result = await validateGeminiSolverSubject({
+    question: "",
+    selectedSubject: "Maths",
+    classifier: async () => {
+      classifierCalled = true;
+      return '{"subject":"Maths","confidence":0.98}';
+    },
+  });
+
+  assert.equal(result.isInvalidInput, true);
+  assert.equal(result.detectedSubject, "Unknown");
+  assert.equal(result.shouldReject, true);
+  assert.equal(classifierCalled, false);
+});
+
+test("semantic Gemini Solver validation rejects raw placeholder inputs before classifier", async () => {
+  let classifierCalled = false;
+
+  const result = await validateGeminiSolverSubject({
+    question: "{{question}}",
+    selectedSubject: "{{selected_subject}}",
+    classifier: async () => {
+      classifierCalled = true;
+      return '{"subject":"Maths","confidence":0.98}';
+    },
+  });
+
+  assert.equal(result.isInvalidInput, true);
+  assert.equal(result.detectedSubject, "Unknown");
+  assert.equal(result.shouldReject, true);
+  assert.equal(classifierCalled, false);
 });
 
 test("semantic Gemini Solver validation accepts matching selected subjects", async () => {
