@@ -639,6 +639,46 @@ test("Gemini Solver fallback detects short Maths curriculum questions", async ()
   }
 });
 
+test("method-priority classification keeps real-world arithmetic questions in Maths", async () => {
+  const questions = [
+    "A lift is 12 m above the ground and moves 7 m down. Find its current height.",
+    "A runner covers 250 m in the morning and 175 m in the evening. Find the total distance covered.",
+    "The temperature was 31 degrees and decreased by 6 degrees. What is the new temperature?",
+  ];
+
+  for (const question of questions) {
+    assert.equal(detectQuestionSubject(question), "Maths");
+
+    const mathsResult = await validateGeminiSolverSubject({
+      question,
+      selectedSubject: "Maths",
+    });
+    const physicsResult = await validateGeminiSolverSubject({
+      question,
+      selectedSubject: "Physics",
+    });
+
+    assert.equal(mathsResult.detectedSubject, "Maths");
+    assert.equal(mathsResult.shouldReject, false);
+    assert.equal(physicsResult.detectedSubject, "Maths");
+    assert.equal(physicsResult.shouldReject, true);
+  }
+});
+
+test("method-priority classification keeps physics formula questions in Physics", async () => {
+  const question = "Calculate force when mass is 5 kg and acceleration is 2 m/s^2";
+
+  assert.equal(detectQuestionSubject(question), "Physics");
+
+  const result = await validateGeminiSolverSubject({
+    question,
+    selectedSubject: "Physics",
+  });
+
+  assert.equal(result.detectedSubject, "Physics");
+  assert.equal(result.shouldReject, false);
+});
+
 test("Gemini Solver validation blocks when no detected subject is available", async () => {
   const result = await validateGeminiSolverSubject({
     question: "Explain this topic in simple words",

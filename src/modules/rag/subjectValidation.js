@@ -108,6 +108,12 @@ const MATH_REPRESENTATION_INTENT_PATTERN =
   /\b(?:express|write|convert|represent|rewrite|round|approximate)\b/i;
 const MATH_REPRESENTATION_TOPIC_PATTERN =
   /\b(?:scientific\s+notation|notation|standard\s+form|expanded\s+form|exponential\s+form|powers?\s+of\s*10|indices|index|exponents?|logarithms?|place\s+value|significant\s+figures?)\b/i;
+const MATH_SOLVING_METHOD_PATTERN =
+  /\b(?:find|calculate|evaluate|solve|simplify|what\s+is|how\s+many|how\s+much|total|sum|difference|product|quotient|remaining|left|more\s+than|less\s+than|increase|decrease|greater|smaller|largest|smallest|average|mean|percentage|percent|ratio|proportion|share|equal\s+parts?|compare|arrange|order)\b/i;
+const PHYSICS_SOLVING_METHOD_PATTERN =
+  /\b(?:physics|law|formula|velocity|speed|acceleration|force|momentum|work\s+done|kinetic\s+energy|potential\s+energy|power|pressure|density|electric\s+current|voltage|resistance|ohm|newton|gravit(?:y|ation|ational)|friction|refraction|reflection|frequency|wavelength|specific\s+heat|latent\s+heat|calorimetry|magnetism|magnetic|circuit|lens|mirror|wave|ray\s+diagram)\b/i;
+const CHEMISTRY_SOLVING_METHOD_PATTERN =
+  /\b(?:chemistry|chemical|atoms?|molecules?|elements?|compounds?|periodic\s+table|valency|moles?|mol|molarity|molality|solute|solvent|solution|concentration|acids?|bases?|salts?|ph|oxidation|reduction|redox|covalent|ionic|bond|isotope|electron\s+configuration|stoichiometry|titration|electrolysis|catalyst|hydrocarbon|reactants?|products?|chemical\s+reaction|chemical\s+equation|combustion|neutralisation|neutralization|organic|inorganic)\b|(?:[A-Z][a-z]?\d*){2,}\s*(?:\+|->|\u2192|=)\s*(?:[A-Z][a-z]?\d*)+/i;
 const NUMERIC_OR_MONEY_PATTERN = /(?:\d|₹|rs\.?|inr)/i;
 const SEMANTIC_SUBJECTS = new Set(["Maths", "Physics", "Chemistry", "Other Subjects"]);
 const SUBJECT_CLASSIFIER_CONFIG = Object.freeze({
@@ -161,6 +167,17 @@ const isNumberSystemConversionQuestion = (question, scores = getSubjectScores(qu
     numberSystemMatches.length >= 2 &&
     NUMBER_SYSTEM_CONVERSION_INTENT_PATTERN.test(text) &&
     NUMERIC_OR_MONEY_PATTERN.test(text)
+  );
+};
+
+const isPureMathematicalSolvingQuestion = (question) => {
+  const text = String(question || "");
+
+  return (
+    NUMERIC_OR_MONEY_PATTERN.test(text) &&
+    MATH_SOLVING_METHOD_PATTERN.test(text) &&
+    !PHYSICS_SOLVING_METHOD_PATTERN.test(text) &&
+    !CHEMISTRY_SOLVING_METHOD_PATTERN.test(text)
   );
 };
 
@@ -235,6 +252,10 @@ export const detectQuestionSubject = (question) => {
     return "Maths";
   }
 
+  if (isPureMathematicalSolvingQuestion(text)) {
+    return "Maths";
+  }
+
   let bestSubject = null;
   let bestScore = 0;
 
@@ -272,6 +293,7 @@ const getQuestionSubjectCandidates = (question) => {
       NUMERIC_MATHS_STRUCTURE_PATTERN.test(text) ||
       isCommercialArithmeticQuestion(text) ||
       isStandaloneMathRepresentationQuestion(text, scores) ||
+      isPureMathematicalSolvingQuestion(text) ||
       isNumberSystemConversionQuestion(text, scores))
   ) {
     candidates.add("Maths");
@@ -283,6 +305,12 @@ const getQuestionSubjectCandidates = (question) => {
 
   if (isStandaloneMathRepresentationQuestion(text, scores)) {
     candidates.add("Maths");
+  }
+
+  if (isPureMathematicalSolvingQuestion(text)) {
+    candidates.add("Maths");
+    candidates.delete("Physics");
+    candidates.delete("Chemistry");
   }
 
   return candidates;
@@ -323,7 +351,7 @@ const buildSemanticSubjectPrompt = ({ question, selectedSubject }) =>
     "",
     "Rules:",
     "1. Do not solve the question.",
-    "2. Classify by academic topic and required reasoning, not by keywords alone.",
+    "2. Classify by the mathematical or scientific solving method required, not by real-world story context or vocabulary alone.",
     "3. Numbers, equations, units, symbols, or chemical-looking letters are not enough by themselves.",
     "4. Arithmetic, place value, Indian/international number systems, lakh/crore/thousand conversions, number systems, algebra, geometry, mensuration, statistics, probability, calculus, percentages, ratios, fractions, decimals, scientific notation, and commercial/financial arithmetic are Maths.",
     "5. Motion, force, energy, electricity, magnetism, waves, optics, heat, pressure, and physical measurements in a physics context are Physics.",
@@ -331,10 +359,15 @@ const buildSemanticSubjectPrompt = ({ question, selectedSubject }) =>
     "7. School-level money word problems about savings, spending, credit/debit amounts, dues, bills, banking arithmetic, discounts, profit/loss, tax, or interest are Maths when the task is to calculate a value.",
     "8. Accounting is Other Subjects only when the task is about accounting concepts or records such as journal entries, ledgers, trial balance, balance sheet, assets, liabilities, or final accounts.",
     "9. Pure representation/manipulation of a number or algebraic expression, such as writing in scientific notation or another notation/form, powers of 10, exponents/indices, logarithmic form, place value, Indian number system conversion, rounding, or significant figures, is Maths when there is no physics or chemistry concept, unit, quantity, formula, or measurement context.",
-    "10. Shared notation belongs to Physics only when it is used inside a physics problem involving physical quantities, units, measurements, formulas, or concepts.",
-    "11. Shared notation belongs to Chemistry only when it is used inside a chemistry problem involving chemical quantities, substances, formulas, equations, moles, atoms, molecules, or reactions.",
-    "12. Biology, English, social science, commerce theory, accounting records, coding, general knowledge, or unclear non-Maths/Physics/Chemistry questions are Other Subjects.",
-    "13. If a question is interdisciplinary, choose the subject a school student would open to solve it.",
+    "10. A real-world situation is Maths when the complete solution only needs addition, subtraction, multiplication, division, integers, fractions, percentages, algebra, or equations.",
+    "11. Words such as movement, position, distance, height, depth, temperature, time, money, objects, measurements, and units do not automatically make a question Physics.",
+    "12. Classify as Physics only when solving requires a physics formula, physics law, physical principle, or scientific interpretation of a physical phenomenon.",
+    "13. Classify as Chemistry only when solving requires chemical reactions, substances, elements, compounds, or chemical properties.",
+    "14. Shared notation belongs to Physics only when it is used inside a physics problem involving physical quantities, laws, formulas, or concepts.",
+    "15. Shared notation belongs to Chemistry only when it is used inside a chemistry problem involving chemical quantities, substances, formulas, equations, moles, atoms, molecules, or reactions.",
+    "16. If a question can be solved completely using mathematical operations without any scientific formula or law, prefer Maths.",
+    "17. Biology, English, social science, commerce theory, accounting records, coding, general knowledge, or unclear non-Maths/Physics/Chemistry questions are Other Subjects.",
+    "18. If a question is interdisciplinary, choose the subject a school student would open to solve it.",
     "",
     "Return only compact JSON with this exact shape:",
     '{"subject":"Maths|Physics|Chemistry|Other Subjects","confidence":0.0}',
