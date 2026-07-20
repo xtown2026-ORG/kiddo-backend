@@ -134,6 +134,10 @@ const SUBJECT_CLASSIFIER_CONFIG = Object.freeze({
   },
 });
 
+const logSubjectValidationDebug = (label, payload) => {
+  console.log(`SUBJECT_VALIDATION_DEBUG ${label}:`, payload);
+};
+
 const isCommercialArithmeticQuestion = (question) => {
   const text = String(question || "");
   return (
@@ -317,7 +321,8 @@ const getQuestionSubjectCandidates = (question) => {
 };
 
 export const validateQuestionSubject = ({ question, selectedSubject, subject }) => {
-  const normalizedSelectedSubject = normalizeSelectedSubject(getProvidedSubject(selectedSubject, subject));
+  const providedSelectedSubject = getProvidedSubject(selectedSubject, subject);
+  const normalizedSelectedSubject = normalizeSelectedSubject(providedSelectedSubject);
   const detectedSubject = detectQuestionSubject(question);
   const shouldSkipSubjectValidation = normalizedSelectedSubject === "Other Subjects";
   const subjectCandidates = getQuestionSubjectCandidates(question);
@@ -329,6 +334,21 @@ export const validateQuestionSubject = ({ question, selectedSubject, subject }) 
       subjectCandidates.size > 0 &&
       !selectedSubjectMatchesCandidates
   );
+
+  logSubjectValidationDebug("REGEX_GUARD_FINAL_RESULT", {
+    selectedSubject: String(providedSelectedSubject || "").trim(),
+    question: String(question || "").trim(),
+    promptSentToGemini: null,
+    rawGeminiResponse: null,
+    parsedJson: null,
+    detectedSubject,
+    subjectCandidates: Array.from(subjectCandidates),
+    normalizedDetectedSubject: normalizeSelectedSubject(detectedSubject),
+    normalizedSelectedSubject,
+    finalValidationResult: shouldReject ? "MISMATCH" : "MATCH",
+    solverAllowed: !shouldReject,
+    source: "regex_guard",
+  });
 
   return {
     isMatch: !shouldReject,
@@ -403,7 +423,15 @@ const extractRawGeminiText = (result) => {
 
 const parseSemanticClassification = (value) => {
   const text = String(value || "").trim();
-  if (!text) return { rawSubject: null, subject: null, confidence: null };
+  if (!text) {
+    return {
+      rawSubject: null,
+      subject: null,
+      confidence: null,
+      parsedJson: null,
+      parseMode: "empty",
+    };
+  }
 
   try {
     const jsonText = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
@@ -413,12 +441,17 @@ const parseSemanticClassification = (value) => {
       rawSubject,
       subject: normalizeSemanticSubjectLabel(rawSubject),
       confidence: normalizeConfidenceScore(parsed?.confidence),
+      parsedJson: parsed,
+      parseMode: "json",
     };
-  } catch {
+  } catch (error) {
     return {
       rawSubject: text,
       subject: normalizeSemanticSubjectLabel(text),
       confidence: null,
+      parsedJson: null,
+      parseMode: "raw_text",
+      parseError: error?.message || String(error),
     };
   }
 };
@@ -455,11 +488,26 @@ const detectFallbackSemanticSubject = (question) => {
   return detectedSubject ? "Other Subjects" : null;
 };
 
-const buildClassificationResult = ({ rawSubject = null, subject, confidence = null, source }) => ({
+const buildClassificationResult = ({
+  rawSubject = null,
+  subject,
+  confidence = null,
+  source,
+  parsedJson = null,
+  parseMode = null,
+  parseError = null,
+  prompt = null,
+  rawResponse = null,
+}) => ({
   rawSubject: rawSubject ?? subject ?? null,
   subject,
   confidence,
   source,
+  parsedJson,
+  parseMode,
+  parseError,
+  prompt,
+  rawResponse,
 });
 
 const runSubjectClassifier = async (prompt) => {
@@ -477,46 +525,125 @@ const runSubjectClassifier = async (prompt) => {
 const classifyQuestionSubjectSemantically = async ({ question, selectedSubject, classifier } = {}) => {
   const prompt = buildSemanticSubjectPrompt({ question, selectedSubject });
 
+  logSubjectValidationDebug("PROMPT", {
+    selectedSubject: String(selectedSubject || "").trim(),
+    question: String(question || "").trim(),
+    prompt,
+  });
+
   if (classifier) {
     const rawText = await classifier({ question, selectedSubject, prompt });
     const classification = parseSemanticClassification(rawText);
+    logSubjectValidationDebug("RAW_RESPONSE", { rawResponse: rawText });
+    logSubjectValidationDebug("PARSED_JSON", {
+      parsedJson: classification.parsedJson,
+      parseMode: classification.parseMode,
+      parseError: classification.parseError,
+      parsedClassification: classification,
+    });
     if (classification.subject) {
-      return buildClassificationResult({ ...classification, source: "semantic" });
+      return buildClassificationResult({
+        ...classification,
+        source: "semantic",
+        prompt,
+        rawResponse: rawText,
+      });
     }
 
     const repairPrompt = buildSemanticSubjectRepairPrompt({ question, previousOutput: rawText });
+    logSubjectValidationDebug("REPAIR_PROMPT", {
+      selectedSubject: String(selectedSubject || "").trim(),
+      question: String(question || "").trim(),
+      prompt: repairPrompt,
+    });
+    const repairRawText = await classifier({ question, selectedSubject, prompt: repairPrompt });
+    const repairClassification = parseSemanticClassification(repairRawText);
+    logSubjectValidationDebug("REPAIR_RAW_RESPONSE", { rawResponse: repairRawText });
+    logSubjectValidationDebug("REPAIR_PARSED_JSON", {
+      parsedJson: repairClassification.parsedJson,
+      parseMode: repairClassification.parseMode,
+      parseError: repairClassification.parseError,
+      parsedClassification: repairClassification,
+    });
     return buildClassificationResult({
-      ...parseSemanticClassification(await classifier({ question, selectedSubject, prompt: repairPrompt })),
+      ...repairClassification,
       source: "semantic",
+      prompt: repairPrompt,
+      rawResponse: repairRawText,
     });
   }
 
   if (!getSubjectClassifierAi()) {
+    const fallbackSubject = detectFallbackSemanticSubject(question);
+    logSubjectValidationDebug("FALLBACK_NO_GEMINI_API_KEY", {
+      selectedSubject: String(selectedSubject || "").trim(),
+      question: String(question || "").trim(),
+      fallbackSubject,
+    });
     return buildClassificationResult({
-      rawSubject: detectFallbackSemanticSubject(question),
-      subject: detectFallbackSemanticSubject(question),
+      rawSubject: fallbackSubject,
+      subject: fallbackSubject,
       source: "fallback",
+      prompt,
+      rawResponse: null,
     });
   }
 
   try {
     const rawText = await runSubjectClassifier(prompt);
     const classification = parseSemanticClassification(rawText);
+    logSubjectValidationDebug("RAW_RESPONSE", { rawResponse: rawText });
+    logSubjectValidationDebug("PARSED_JSON", {
+      parsedJson: classification.parsedJson,
+      parseMode: classification.parseMode,
+      parseError: classification.parseError,
+      parsedClassification: classification,
+    });
     if (classification.subject) {
-      return buildClassificationResult({ ...classification, source: "semantic" });
+      return buildClassificationResult({
+        ...classification,
+        source: "semantic",
+        prompt,
+        rawResponse: rawText,
+      });
     }
 
     const repairPrompt = buildSemanticSubjectRepairPrompt({ question, previousOutput: rawText });
+    logSubjectValidationDebug("REPAIR_PROMPT", {
+      selectedSubject: String(selectedSubject || "").trim(),
+      question: String(question || "").trim(),
+      prompt: repairPrompt,
+    });
+    const repairRawText = await runSubjectClassifier(repairPrompt);
+    const repairClassification = parseSemanticClassification(repairRawText);
+    logSubjectValidationDebug("REPAIR_RAW_RESPONSE", { rawResponse: repairRawText });
+    logSubjectValidationDebug("REPAIR_PARSED_JSON", {
+      parsedJson: repairClassification.parsedJson,
+      parseMode: repairClassification.parseMode,
+      parseError: repairClassification.parseError,
+      parsedClassification: repairClassification,
+    });
     return buildClassificationResult({
-      ...parseSemanticClassification(await runSubjectClassifier(repairPrompt)),
+      ...repairClassification,
       source: "semantic",
+      prompt: repairPrompt,
+      rawResponse: repairRawText,
     });
   } catch (error) {
     console.error("SUBJECT_CLASSIFIER_FAILED", error?.status || "", error?.message || error);
+    const fallbackSubject = detectFallbackSemanticSubject(question);
+    logSubjectValidationDebug("FALLBACK_AFTER_CLASSIFIER_ERROR", {
+      selectedSubject: String(selectedSubject || "").trim(),
+      question: String(question || "").trim(),
+      error: error?.message || String(error),
+      fallbackSubject,
+    });
     return buildClassificationResult({
-      rawSubject: detectFallbackSemanticSubject(question),
-      subject: detectFallbackSemanticSubject(question),
+      rawSubject: fallbackSubject,
+      subject: fallbackSubject,
       source: "fallback",
+      prompt,
+      rawResponse: null,
     });
   }
 };
@@ -533,6 +660,14 @@ export const validateGeminiSolverSubject = async ({
   const providedSelectedSubject = getProvidedSubject(selectedSubject, subject);
 
   if (!hasSubjectValidationInput(providedSelectedSubject) || !hasSubjectValidationInput(question)) {
+    logSubjectValidationDebug("FINAL_RESULT", {
+      selectedSubject: String(providedSelectedSubject || "").trim(),
+      question: String(question || "").trim(),
+      normalizedDetectedSubject: "Unknown",
+      normalizedSelectedSubject: normalizeSelectedSubject(providedSelectedSubject),
+      finalValidationResult: "INVALID_INPUT",
+      solverAllowed: false,
+    });
     return {
       isMatch: false,
       shouldReject: true,
@@ -548,6 +683,14 @@ export const validateGeminiSolverSubject = async ({
   const shouldSkipSubjectValidation = normalizedSelectedSubject === "Other Subjects";
 
   if (shouldSkipSubjectValidation || !PRIMARY_VALIDATION_SUBJECTS.has(normalizedSelectedSubject)) {
+    logSubjectValidationDebug("FINAL_RESULT", {
+      selectedSubject: String(providedSelectedSubject || "").trim(),
+      question: String(question || "").trim(),
+      normalizedDetectedSubject: null,
+      normalizedSelectedSubject,
+      finalValidationResult: "SKIPPED",
+      solverAllowed: true,
+    });
     return {
       isMatch: true,
       shouldReject: false,
@@ -571,6 +714,23 @@ export const validateGeminiSolverSubject = async ({
   const solverAllowed = normalizedDetectedSubject === normalizedSelectedSubject;
   const shouldReject = !solverAllowed;
   const validationResult = shouldReject ? "MISMATCH" : "MATCH";
+
+  logSubjectValidationDebug("FINAL_RESULT", {
+    selectedSubject: String(providedSelectedSubject || "").trim(),
+    question: String(question || "").trim(),
+    promptSentToGemini: classification.prompt,
+    rawGeminiResponse: classification.rawResponse,
+    parsedJson: classification.parsedJson,
+    parseMode: classification.parseMode,
+    parseError: classification.parseError,
+    rawDetectedSubject,
+    normalizedDetectedSubject,
+    normalizedSelectedSubject,
+    finalValidationResult: validationResult,
+    solverAllowed,
+    source: classification.source,
+    confidenceScore: classification.confidence,
+  });
 
   console.log(`QUESTION_TEXT = ${String(question || "").trim()}`);
   console.log(`RAW_DETECTED_SUBJECT = ${rawDetectedSubject || "Unknown"}`);
